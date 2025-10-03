@@ -1,0 +1,47 @@
+{
+  "repository": {
+    "name": "Fried-Squid/mint",
+    "default_branch": "main"
+  },
+  "directories": {
+    "root": "mint",
+    "packages": ".mint-package",
+    "cache": ".cache/mint-package",
+    "configs": "configs",
+    "templates": "config_templates"
+  },
+  "package_manifest": "packages.json",
+  "paths": {
+    "miner": {
+      "code_path": "miner",
+      "templates": [
+        {
+          "name": "state",
+          "path": "config_templates/.miner.state.template"
+        },
+        {
+          "name": "env",
+          "path": "config_templates/.miner.env.template"
+        }
+      ]
+    },
+    "tunnel": {
+      "code_path": "tunnel",
+      "templates": [
+        {
+          "name": "state",
+          "path": "config_templates/.tunnel.state.template"
+        }
+      ]
+    },
+    "courier": {
+      "code_path": "courier",
+      "templates": [
+        {
+          "name": "env",
+          "path": "config_templates/.courier.env.template"
+        }
+      ]
+    }
+  }
+}

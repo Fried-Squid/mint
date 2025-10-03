@@ -2,7 +2,7 @@
 -- A package manager for the Mint framework
 -- Usage: mint-package.lua <command> <package> [options]
 
-local args = {...}
+local args = { ... }
 
 -- Load HTTP module for non-ComputerCraft environments
 if not http then
@@ -35,7 +35,10 @@ if not fs then
     fs = {
         exists = function(path)
             local file = io.open(path, "r")
-            if file then file:close() return true end
+            if file then
+                file:close()
+                return true
+            end
             return false
         end,
         makeDir = function(path) os.execute("mkdir -p " .. path) end,
@@ -137,18 +140,71 @@ if not os.date then
     os.date = function() return "unknown" end
 end
 
--- Configuration
+-- Configuration - default values that can be overridden by .mintlinker file
 local GITHUB_API = "https://api.github.com"
 local GITHUB_RAW = "https://raw.githubusercontent.com"
-local PACKAGE_REPO = "aceh/mint-packages" -- Default repository for packages
+local PACKAGE_REPO = "Fried-Squid/mint" -- Default repository
+local DEFAULT_BRANCH = "main"           -- Default branch
 local PACKAGE_MANIFEST = "packages.json"
 
+-- Load repository info from .mintlinker if available
+local function loadRepoInfo()
+    if fs.exists(".mintlinker") then
+        local file = fs.open(".mintlinker", "r")
+        if file then
+            local content = file.readAll()
+            file.close()
+
+            local config = textutils.unserialiseJSON and textutils.unserialiseJSON(content) or
+                textutils.unserialize(content)
+            if config and config.repository then
+                return config.repository.name or PACKAGE_REPO,
+                    config.repository.default_branch or DEFAULT_BRANCH,
+                    config.package_manifest or PACKAGE_MANIFEST
+            end
+        end
+    end
+    return PACKAGE_REPO, DEFAULT_BRANCH, PACKAGE_MANIFEST
+end
+
+PACKAGE_REPO, DEFAULT_BRANCH, PACKAGE_MANIFEST = loadRepoInfo()
+
+-- GitHub URL construction helper
+local function getGitHubRawUrl(repo, branch, path)
+    -- Try modern URL format first
+    local urls = {
+        string.format("%s/%s/%s/%s", GITHUB_RAW, repo, branch, path),
+        string.format("%s/%s/refs/heads/%s/%s", GITHUB_RAW, repo, branch, path)
+    }
+    return urls
+end
+
 -- Directory structure
-local MINT_ROOT = "mint"
-local PACKAGE_DIR = ".mint-package"
-local CACHE_DIR = ".cache/mint-package"
-local CONFIG_DIR = ".config/configs"
-local TEMPLATE_DIR = ".config/templates"
+-- Directory structure - can be overridden by .mintlinker file
+local function getDirectoryStructure()
+    if fs.exists(".mintlinker") then
+        local file = fs.open(".mintlinker", "r")
+        if file then
+            local content = file.readAll()
+            file.close()
+
+            local config = textutils.unserialiseJSON and textutils.unserialiseJSON(content) or
+                textutils.unserialize(content)
+            if config and config.directories then
+                return config.directories.root or "mint",
+                    config.directories.packages or ".mint-package",
+                    config.directories.cache or ".cache/mint-package",
+                    config.directories.configs or ".config/configs",
+                    config.directories.templates or ".config/templates"
+            end
+        end
+    end
+
+    -- Default structure
+    return "mint", ".mint-package", ".cache/mint-package", ".config/configs", ".config/templates"
+end
+
+local MINT_ROOT, PACKAGE_DIR, CACHE_DIR, CONFIG_DIR, TEMPLATE_DIR = getDirectoryStructure()
 
 -- Utility functions
 local function printUsage()
@@ -382,21 +438,42 @@ local function loadPackageInfo(packageName)
 end
 
 local function getPackageManifest()
-    local url = string.format("%s/%s/master/%s", GITHUB_RAW, PACKAGE_REPO, PACKAGE_MANIFEST)
-    local content = makeRequest(url)
+    -- First try to read the manifest locally
+    if fs.exists(PACKAGE_MANIFEST) then
+        log("Using local package manifest")
+        local file = fs.open(PACKAGE_MANIFEST, "r")
+        if file then
+            local content = file.readAll()
+            file.close()
+            return parseJSON(content)
+        end
+    end
+
+    -- Try from GitHub if local file doesn't exist or can't be parsed
+    local urls = getGitHubRawUrl(PACKAGE_REPO, DEFAULT_BRANCH, PACKAGE_MANIFEST)
+
+    -- Try each URL format
+    local content
+    for _, url in ipairs(urls) do
+        content = makeRequest(url)
+        if content then
+            break
+        end
+    end
+
     if not content then
         log("Failed to download package manifest", "ERROR")
         return nil
     end
 
     return parseJSON(content)
-}
+end
 
 local function findPackage(packageName, manifest)
     manifest = manifest or getPackageManifest()
     if not manifest then
         return nil
-    }
+    end
 
     for _, package in ipairs(manifest) do
         if package.name == packageName then
@@ -416,38 +493,141 @@ local function downloadPackageFiles(package, targetDir)
 
     -- Download main files
     for _, file in ipairs(package.files) do
-        local sourceUrl
+        -- Handle subdirectories in path
+        local targetPath = fs.combine(targetDir, file.path)
+        local targetDir = fs.getDir(targetPath)
+        if not fs.exists(targetDir) then
+            fs.makeDir(targetDir)
+        end
+        local success = false
+
         if file.url then
-            sourceUrl = file.url
+            -- Use direct URL if provided
+            success = downloadFile(file.url, targetPath)
         else
-            sourceUrl = string.format("%s/%s/master/packages/%s/%s",
-                GITHUB_RAW, PACKAGE_REPO, package.name, file.path)
+            -- Try both URL formats
+            -- First check if it's in this repo directly
+            local localPath = file.path
+
+            -- Try to get local path from .mintlinker if available
+            if fs.exists(".mintlinker") then
+                local mlFile = fs.open(".mintlinker", "r")
+                if mlFile then
+                    local mlContent = mlFile.readAll()
+                    mlFile.close()
+
+                    local mlConfig = textutils.unserialiseJSON and textutils.unserialiseJSON(mlContent) or
+                        textutils.unserialize(mlContent)
+                    if mlConfig and mlConfig.paths and mlConfig.paths[package.name] then
+                        localPath = fs.combine(mlConfig.paths[package.name].code_path or package.name,
+                            file.path:match("[^/]+$"))
+                    end
+                end
+            end
+
+            if fs.exists(localPath) then
+                log("Using local file: " .. localPath)
+                local srcFile = fs.open(localPath, "r")
+                if srcFile then
+                    local content = srcFile.readAll()
+                    srcFile.close()
+
+                    local destFile = fs.open(targetPath, "w")
+                    if destFile then
+                        destFile.write(content)
+                        destFile.close()
+                        success = true
+                    end
+                end
+            else
+                -- Try GitHub URL
+                local filePath = string.format("%s/%s", package.name, file.path)
+                local urls = getGitHubRawUrl(PACKAGE_REPO, DEFAULT_BRANCH, filePath)
+
+                for _, url in ipairs(urls) do
+                    log("Trying URL: " .. url)
+                    success = downloadFile(url, targetPath)
+                    if success then
+                        break
+                    end
+                end
+            end
         end
 
-        local targetPath = fs.combine(targetDir, file.path)
-        if downloadFile(sourceUrl, targetPath) then
+        if success then
             downloadCount = downloadCount + 1
         else
             errorCount = errorCount + 1
         end
-    }
+    end
 
     -- Download config templates
     if package.templates then
         for _, template in ipairs(package.templates) do
-            local sourceUrl
-            if template.url then
-                sourceUrl = template.url
-            else
-                sourceUrl = string.format("%s/%s/master/packages/%s/templates/%s",
-                    GITHUB_RAW, PACKAGE_REPO, package.name, template.filename)
-            end
-
             local targetPath = fs.combine(TEMPLATE_DIR, "." .. package.name .. "." .. template.name .. ".template")
-            if downloadFile(sourceUrl, targetPath) then
-                downloadCount = downloadCount + 1
+            local success = false
+
+            if template.url then
+                -- Use direct URL if provided
+                success = downloadFile(template.url, targetPath)
             else
-                errorCount = errorCount + 1
+                -- Try both URL formats
+                -- First check if template exists locally
+                local localTemplatePath = string.format("config_templates/.%s.%s.template", package.name, template.name)
+
+                -- Try to get template path from .mintlinker if available
+                if fs.exists(".mintlinker") then
+                    local mlFile = fs.open(".mintlinker", "r")
+                    if mlFile then
+                        local mlContent = mlFile.readAll()
+                        mlFile.close()
+
+                        local mlConfig = textutils.unserialiseJSON and textutils.unserialiseJSON(mlContent) or
+                            textutils.unserialize(mlContent)
+                        if mlConfig and mlConfig.paths and mlConfig.paths[package.name] then
+                            for _, tmpl in ipairs(mlConfig.paths[package.name].templates or {}) do
+                                if tmpl.name == template.name then
+                                    localTemplatePath = tmpl.path
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+
+                if fs.exists(localTemplatePath) then
+                    log("Using local template: " .. localTemplatePath)
+                    local srcFile = fs.open(localTemplatePath, "r")
+                    if srcFile then
+                        local content = srcFile.readAll()
+                        srcFile.close()
+
+                        local destFile = fs.open(targetPath, "w")
+                        if destFile then
+                            destFile.write(content)
+                            destFile.close()
+                            success = true
+                        end
+                    end
+                else
+                    -- Try GitHub URL
+                    local templatePath = string.format("%s/templates/%s", package.name, template.filename)
+                    local urls = getGitHubRawUrl(PACKAGE_REPO, DEFAULT_BRANCH, templatePath)
+
+                    for _, url in ipairs(urls) do
+                        log("Trying template URL: " .. url)
+                        success = downloadFile(url, targetPath)
+                        if success then
+                            break
+                        end
+                    end
+                end
+
+                if success then
+                    downloadCount = downloadCount + 1
+                else
+                    errorCount = errorCount + 1
+                end
             end
         end
     end
@@ -473,18 +653,18 @@ local function downloadPackageFiles(package, targetDir)
             else
                 log(string.format("Dependency not found: %s", dependency), "ERROR")
                 errorCount = errorCount + 1
-            }
+            end
         end
-    }
+    end
 
     log(string.format("Downloaded %d files with %d errors", downloadCount, errorCount))
     return errorCount == 0, downloadCount, errorCount
-}
+end
 
 local function createLauncherScript(package, packageDir)
     if not package.launcher then
         return true
-    }
+    end
 
     local launcherPath = fs.combine(MINT_ROOT, package.name .. ".lua")
     local launcherContent = string.format([[
@@ -508,7 +688,7 @@ return main.run(unpack(args))
         log(string.format("Failed to create launcher: %s", launcherPath), "ERROR")
         return false
     end
-}
+end
 
 local function installPackage(packageName)
     log(string.format("Installing package: %s", packageName))
@@ -524,14 +704,14 @@ local function installPackage(packageName)
     local manifest = getPackageManifest()
     if not manifest then
         return false
-    }
+    end
 
     -- Find package in manifest
     local package = findPackage(packageName, manifest)
     if not package then
         log(string.format("Package not found: %s", packageName), "ERROR")
         return false
-    }
+    end
 
     -- Create package directory
     local packageDir = fs.combine(PACKAGE_DIR, packageName)
@@ -539,17 +719,22 @@ local function installPackage(packageName)
         log(string.format("Package already installed: %s", packageName), "WARN")
         log("Use 'mint-package.lua update " .. packageName .. "' to update")
         return false
-    }
+    end
 
     -- Download package files
     local success = downloadPackageFiles(package, packageDir)
     if not success then
         log(string.format("Failed to install package: %s", packageName), "ERROR")
         return false
-    }
+    end
 
-    -- Create launcher script
-    createLauncherScript(package, packageDir)
+    -- Create launcher script if it doesn't exist locally
+    local launcherPath = fs.combine(MINT_ROOT, package.name .. ".lua")
+    if not fs.exists(launcherPath) then
+        createLauncherScript(package, packageDir)
+    else
+        log("Launcher script already exists: " .. launcherPath)
+    end
 
     -- Save package info
     savePackageInfo(packageName, package)
@@ -561,10 +746,10 @@ local function installPackage(packageName)
         print("\nUsage Instructions:")
         print("==================")
         print(package.usage)
-    }
+    end
 
     return true
-}
+end
 
 local function updatePackage(packageName)
     log(string.format("Updating package: %s", packageName))
@@ -575,38 +760,38 @@ local function updatePackage(packageName)
         log(string.format("Package not installed: %s", packageName), "ERROR")
         log("Use 'mint-package.lua install " .. packageName .. "' to install")
         return false
-    }
+    end
 
     -- Get current package info
     local currentInfo = loadPackageInfo(packageName)
     if not currentInfo then
         log(string.format("Package info missing: %s", packageName), "WARN")
-    }
+    end
 
     -- Get package manifest
     local manifest = getPackageManifest()
     if not manifest then
         return false
-    }
+    end
 
     -- Find package in manifest
     local package = findPackage(packageName, manifest)
     if not package then
         log(string.format("Package no longer available: %s", packageName), "ERROR")
         return false
-    }
+    end
 
     -- Check if update is needed
     if currentInfo and currentInfo.version == package.version then
         log(string.format("Package already up to date: %s (v%s)", packageName, package.version))
         return true
-    }
+    end
 
     -- Backup current package directory
     local backupDir = fs.combine(CACHE_DIR, packageName .. "_backup")
     if fs.exists(backupDir) then
         fs.delete(backupDir)
-    }
+    end
 
     -- Create backup
     ensureDirectory(backupDir)
@@ -634,7 +819,7 @@ local function updatePackage(packageName)
         else
             fs.copy(srcPath, dstPath)
         end
-    }
+    end
 
     -- Delete current package directory
     fs.delete(packageDir)
@@ -662,7 +847,7 @@ local function updatePackage(packageName)
         end
         copyDir(backupDir, packageDir)
         return false
-    }
+    end
 
     -- Update launcher script
     createLauncherScript(package, packageDir)
@@ -683,10 +868,10 @@ local function updatePackage(packageName)
         print("\nChangelog:")
         print("=========")
         print(package.changelog)
-    }
+    end
 
     return true
-}
+end
 
 local function removePackage(packageName)
     log(string.format("Removing package: %s", packageName))
@@ -696,7 +881,7 @@ local function removePackage(packageName)
     if not fs.exists(packageDir) then
         log(string.format("Package not installed: %s", packageName), "ERROR")
         return false
-    }
+    end
 
     -- Get package info
     local packageInfo = loadPackageInfo(packageName)
@@ -706,7 +891,7 @@ local function removePackage(packageName)
     if fs.exists(launcherPath) then
         fs.delete(launcherPath)
         log(string.format("Removed launcher: %s", launcherPath))
-    }
+    end
 
     -- Remove config templates
     if packageInfo and packageInfo.templates then
@@ -715,9 +900,9 @@ local function removePackage(packageName)
             if fs.exists(templatePath) then
                 fs.delete(templatePath)
                 log(string.format("Removed template: %s", templatePath))
-            }
+            end
         end
-    }
+    end
 
     -- Remove package directory
     fs.delete(packageDir)
@@ -726,17 +911,17 @@ local function removePackage(packageName)
     local infoPath = fs.combine(CACHE_DIR, packageName .. ".json")
     if fs.exists(infoPath) then
         fs.delete(infoPath)
-    }
+    end
 
     log(string.format("Package removed successfully: %s", packageName))
     return true
-}
+end
 
 local function listInstalledPackages()
     if not fs.exists(PACKAGE_DIR) then
         log("No packages installed", "INFO")
         return
-    }
+    end
 
     local packages = {}
     local dirs = fs.list(PACKAGE_DIR)
@@ -750,12 +935,12 @@ local function listInstalledPackages()
                 description = info and info.description or "No description available"
             })
         end
-    }
+    end
 
     if #packages == 0 then
         log("No packages installed", "INFO")
         return
-    }
+    end
 
     -- Sort alphabetically
     table.sort(packages, function(a, b) return a.name < b.name end)
@@ -767,14 +952,14 @@ local function listInstalledPackages()
         print("   " .. package.description)
     end
     print(string.format("\nTotal: %d packages installed", #packages))
-}
+end
 
 local function searchPackages(query)
     -- Get package manifest
     local manifest = getPackageManifest()
     if not manifest then
         return false
-    }
+    end
 
     query = query:lower()
     local results = {}
@@ -796,7 +981,7 @@ local function searchPackages(query)
         if nameMatch or descMatch or tagsMatch then
             table.insert(results, package)
         end
-    }
+    end
 
     -- Sort by relevance
     table.sort(results, function(a, b)
@@ -818,7 +1003,7 @@ local function searchPackages(query)
     if #results == 0 then
         print("No packages found matching your query.")
         return true
-    }
+    end
 
     for _, package in ipairs(results) do
         local installed = fs.exists(fs.combine(PACKAGE_DIR, package.name))
@@ -828,11 +1013,11 @@ local function searchPackages(query)
         if package.tags and #package.tags > 0 then
             print("   Tags: " .. table.concat(package.tags, ", "))
         end
-    }
+    end
 
     print(string.format("\nTotal: %d packages found", #results))
     return true
-}
+end
 
 local function showPackageInfo(packageName)
     -- First check if package is installed locally
@@ -844,14 +1029,14 @@ local function showPackageInfo(packageName)
         if not localInfo then
             return false
         end
-    }
+    end
 
     local remoteInfo = findPackage(packageName, manifest)
 
     if not localInfo and not remoteInfo then
         log(string.format("Package not found: %s", packageName), "ERROR")
         return false
-    }
+    end
 
     -- Use remote info as base, fall back to local
     local info = remoteInfo or localInfo
@@ -878,29 +1063,29 @@ local function showPackageInfo(packageName)
             local depInstalled = fs.exists(fs.combine(PACKAGE_DIR, dep))
             print(string.format("- %s %s", dep, depInstalled and "(installed)" or "(not installed)"))
         end
-    }
+    end
 
     if info.templates and #info.templates > 0 then
         print("\nConfiguration Templates:")
         for _, template in ipairs(info.templates) do
             print(string.format("- %s: %s", template.name, template.description or "No description"))
         end
-    }
+    end
 
     if info.usage then
         print("\nUsage Instructions:")
         print(info.usage)
-    }
+    end
 
     if installed and info.files and #info.files > 0 then
         print("\nInstalled Files:")
         for _, file in ipairs(info.files) do
             print("- " .. file.path)
         end
-    }
+    end
 
     return true
-}
+end
 
 -- Main command handler
 local function main()
@@ -916,7 +1101,7 @@ local function main()
     if #arguments == 0 then
         printUsage()
         return
-    }
+    end
 
     local command = arguments[1]:lower()
 
@@ -924,16 +1109,15 @@ local function main()
         if #arguments < 2 then
             log("Usage: mint-package.lua install <package>", "ERROR")
             return
-        }
+        end
 
         local packageName = arguments[2]
         installPackage(packageName)
-
     elseif command == "update" then
         if #arguments < 2 then
             log("Usage: mint-package.lua update <package|all>", "ERROR")
             return
-        }
+        end
 
         local packageName = arguments[2]
 
@@ -942,7 +1126,7 @@ local function main()
             if not fs.exists(PACKAGE_DIR) then
                 log("No packages installed", "INFO")
                 return
-            }
+            end
 
             local dirs = fs.list(PACKAGE_DIR)
             local successCount = 0
@@ -958,48 +1142,43 @@ local function main()
                         errorCount = errorCount + 1
                     end
                 end
-            }
+            end
 
             log(string.format("Update complete: %d packages updated, %d errors", successCount, errorCount))
         else
             updatePackage(packageName)
         end
-
     elseif command == "remove" then
         if #arguments < 2 then
             log("Usage: mint-package.lua remove <package>", "ERROR")
             return
-        }
+        end
 
         local packageName = arguments[2]
         removePackage(packageName)
-
     elseif command == "list" then
         listInstalledPackages()
-
     elseif command == "search" then
         if #arguments < 2 then
             log("Usage: mint-package.lua search <query>", "ERROR")
             return
-        }
+        end
 
         local query = arguments[2]
         searchPackages(query)
-
     elseif command == "info" then
         if #arguments < 2 then
             log("Usage: mint-package.lua info <package>", "ERROR")
             return
-        }
+        end
 
         local packageName = arguments[2]
         showPackageInfo(packageName)
-
     else
         log("Unknown command: " .. command, "ERROR")
         printUsage()
     end
-}
+end
 
 -- Run the program
 main()

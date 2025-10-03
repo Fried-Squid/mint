@@ -78,6 +78,7 @@ function API.save_config(filepath, config)
     local file = fs.open(filepath, "w")
     file.write("return {\n")
     for key, value in pairs(config) do
+	print("DEBUG -- WRITING " .. tostring(key) .. " AS " .. tostring(value))
         if type(value) == "string" then
             file.write(string.format('  %s = "%s",\n', key, value))
         else
@@ -254,6 +255,7 @@ function step()
     else
 	setlook(1)
     end
+    API.save_config(".minerstate", minerstate)
     -- We are now ready to start step AGAIN.
 end
 

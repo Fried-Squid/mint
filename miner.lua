@@ -1,9 +1,10 @@
 -- Load config files
 local function loadconfig(filepath)
-    if not fs.exists(filepath) then
+    local dir = "mint/"
+    if not fs.exists(dir .. filepath) then
         error("Config file not found: " .. filepath)
     end
-    return dofile(filepath)
+    return dofile(dir .. filepath)
 end
 
 dotenv = loadconfig(".env")
@@ -234,9 +235,9 @@ function step()
     -- We now set lookdir to face along RIGHT which depends on the tunnel direction. If tunnel direction is 
     -- 1 (+Z) we are moving to -X to face right, else +X. +X is 00_2, -X is 10_2 so 2
     if tunnelstate.zdir == 0 then
-	setlook(2) -- + zdir -> -X
+	setlook(0) -- + zdir -> -X
     else
-	setlook(0) -- - zdir -> +X
+	setlook(2) -- - zdir -> +X
     end
     for i = 1, 8 do
         forcemove_h(7) -- forcemove along row

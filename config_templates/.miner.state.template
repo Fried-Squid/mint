@@ -1,0 +1,5 @@
+return {
+    lookdir = "number",
+    step = "number",
+    substep = "number"
+}

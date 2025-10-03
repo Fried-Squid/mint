@@ -239,7 +239,7 @@ function step()
     else
 	setlook(2) -- - zdir -> +X
     end
-    for i = 1, 8 do
+    for i = 1, 7 do
         forcemove_h(7) -- forcemove along row
 	forcemove_v(1, vdir) -- move vdir
 	setlook((minerstate.lookdir + 2) % 4) -- swap look sign bit (2 becomes 0, 0 becomes 2)
@@ -249,9 +249,15 @@ function step()
 
     minerstate.step = minerstate.step + 1 -- inc step
     -- now we set the final look to the tunner direction. +Z is 01_2 = 1 -Z is 11_2 = 3
-    setlook(tunnelstate.zdir * 2 + 1) -- seems silly but 0 becomes 1, 1 becomes 3.
-
+    if tunnelstate.zdir == 0 then
+	setlook(3)
+    else
+	setlook(1)
+    end
     -- We are now ready to start step AGAIN.
 end
+
+step()
+step()
 
 

@@ -1,10 +1,8 @@
 local Mint = require("mintlib.mint")
 local API = require("miner.api")
 
--- Initialize Mint instance with module name
+-- Initialize Mint and open configs
 local mint = Mint.new("miner")
-
--- Load configurations with simplified API
 local dotenv = mint:config("miner.env")
 local tunnelstate = mint:config("tunnel.state")
 local minerstate = mint:config("miner.state")

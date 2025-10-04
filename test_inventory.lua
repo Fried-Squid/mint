@@ -1,12 +1,12 @@
 -- Test script for the inventory management system
 
--- Fix module loading path for ComputerCraft
-package.path = package.path .. ";/?;/?.lua"
+-- Load the helper module for consistent module loading
+local loader = dofile("mint/loader.lua")
 
--- Load modules
-local config = require("mint.config")
-local inventory = require("mint.inventory")
-local logger = require("mint.logger")
+-- Load modules with proper error handling
+local config = loader.require("mint.config")
+local inventory = loader.require("mint.inventory")
+local logger = loader.require("mint.logger")
 
 -- Set log level to debug for detailed output
 logger.set_level(logger.LEVELS.DEBUG)

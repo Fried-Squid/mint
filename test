@@ -1,0 +1,4 @@
+-- Simple test script that runs the inventory test
+print("Starting inventory test...")
+shell.run("mint/test_inventory")
+print("Test completed.")

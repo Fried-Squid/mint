@@ -1,11 +1,15 @@
 -- Main mining program
 
--- Fix module loading path for ComputerCraft
-package.path = package.path .. ";/?;/?.lua"
+-- Load the helper module for consistent module loading
+local loader = dofile("mint/loader.lua")
 
-local config = require("mint.config")
-local movement = require("mint.movement")
-local inventory = require("mint.inventory")
+-- Load modules with proper error handling
+local config = loader.require("mint.config")
+local movement = loader.require("mint.movement")
+local inventory = loader.require("mint.inventory")
+
+-- Ensure turtle API is available
+loader.ensure_turtle()
 
 print("Miner initialization...")
 print("Miner ID: " .. config.dotenv.minerid)

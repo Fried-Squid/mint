@@ -1,15 +1,14 @@
 -- Movement module for the mining turtle
 local movement = {}
 
--- Fix module loading path for ComputerCraft
-package.path = package.path .. ";/?;/?.lua"
+-- Load the helper module for consistent module loading
+local loader = dofile("mint/loader.lua")
 
-local config = require("mint.config")
+-- Load config module with proper error handling
+local config = loader.require("mint.config")
 
 -- Ensure turtle API is available
-if not turtle and _G.turtle then
-    turtle = _G.turtle
-end
+loader.ensure_turtle()
 
 -- Set the turtle's facing direction
 function movement.setlook(wishdir)

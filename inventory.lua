@@ -303,6 +303,9 @@ function inventory.process_sacks(inv)
     -- Scan inventory to get current state
     inventory.scan(inv)
 
+    -- Track which slots we've already processed
+    local processed_slots = {}
+
     -- Clear sack contents
     inv.peripherals_sack.contents = {}
     inv.peripherals_sack.used_slots = 0
@@ -310,6 +313,8 @@ function inventory.process_sacks(inv)
     inv.fuel_sack.used_slots = 0
     inv.ore_sack.contents = {}
     inv.ore_sack.used_slots = 0
+    inv.trash_sack.contents = {}
+    inv.trash_sack.used_slots = 0
 
     -- Process each slot in the inventory
     for _, item in ipairs(inv.raw_contents) do
@@ -326,6 +331,11 @@ function inventory.process_sacks(inv)
         local is_fuel = inventory.is_fuel(inv, name)
         local is_trash = inventory.is_trash(inv, name)
 
+        -- Skip slots we've already processed
+        if processed_slots[slot] then
+            goto continue
+        end
+
         -- Handle based on item type and current location
         if is_trash then
             -- Add to trash sack for later processing
@@ -335,6 +345,7 @@ function inventory.process_sacks(inv)
                 slot = slot
             })
             inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
+            processed_slots[slot] = true
         elseif is_peripheral then
             if in_peripheral_range then
                 -- Item is already in the right sack
@@ -344,6 +355,7 @@ function inventory.process_sacks(inv)
                     slot = slot
                 })
                 inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+                processed_slots[slot] = true
             else
                 -- Item needs to be moved to peripherals sack
                 local target_slot = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
@@ -355,6 +367,8 @@ function inventory.process_sacks(inv)
                             slot = target_slot
                         })
                         inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+                        processed_slots[slot] = true
+                        processed_slots[target_slot] = true
                     end
                 end
             end
@@ -367,6 +381,7 @@ function inventory.process_sacks(inv)
                     slot = slot
                 })
                 inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+                processed_slots[slot] = true
             else
                 -- Item needs to be moved to fuel sack
                 local target_slot = inventory.find_slot_in_sack(inv, inv.fuel_sack)
@@ -378,6 +393,8 @@ function inventory.process_sacks(inv)
                             slot = target_slot
                         })
                         inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+                        processed_slots[slot] = true
+                        processed_slots[target_slot] = true
                     end
                 end
             end
@@ -391,6 +408,7 @@ function inventory.process_sacks(inv)
                     slot = slot
                 })
                 inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+                processed_slots[slot] = true
             else
                 -- Item needs to be moved to ore sack
                 local target_slot = inventory.find_slot_in_sack(inv, inv.ore_sack)
@@ -402,10 +420,13 @@ function inventory.process_sacks(inv)
                             slot = target_slot
                         })
                         inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+                        processed_slots[slot] = true
+                        processed_slots[target_slot] = true
                     end
                 end
             end
         end
+        ::continue::
     end
 end
 
@@ -427,6 +448,10 @@ function inventory.process_unassigned(inv)
         assigned_slots[item.slot] = true
     end
 
+    for _, item in ipairs(inv.trash_sack.contents) do
+        assigned_slots[item.slot] = true
+    end
+
     -- Process items not yet in a sack
     for _, item in ipairs(inv.raw_contents) do
         if not assigned_slots[item.slot] then
@@ -442,6 +467,8 @@ function inventory.process_unassigned(inv)
 
                 -- Mark as assigned
                 assigned_slots[item.slot] = true
+                assigned_slots[target_slot] = true
+                assigned_slots[target_slot] = true
             elseif inventory.is_peripheral(inv, item.name) then
                 local target_slot = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
                 if target_slot then
@@ -455,6 +482,7 @@ function inventory.process_unassigned(inv)
 
                         -- Mark as assigned
                         assigned_slots[item.slot] = true
+                        assigned_slots[target_slot] = true
                     end
                 end
             elseif inventory.is_fuel(inv, item.name) then
@@ -612,21 +640,29 @@ function inventory.find_slot_in_sack(inv, sack)
         return nil
     end
 
-    -- Track which slots are already used in this sack
+    -- Track which slots are already used in this sack and
+    -- which physical slots already have items
     local used_slots = {}
+    local occupied_slots = {}
+
+    -- Mark slots that are already being used in this sack
     for _, item in ipairs(sack.contents) do
         used_slots[item.slot] = true
     end
 
+    -- Check which slots are physically occupied
+    for slot = sack.start_slot, sack.end_slot, -1 do
+        local detail = turtle.getItemDetail(slot + 1)
+        if detail then
+            occupied_slots[slot] = true
+        end
+    end
+
     -- Search from start_slot (highest) down to end_slot (lowest)
     for slot = sack.start_slot, sack.end_slot, -1 do
-        -- Check if this slot is available
-        if not used_slots[slot] then
-            -- Check if the physical slot is empty
-            local detail = turtle.getItemDetail(slot + 1)
-            if not detail then
-                return slot
-            end
+        -- Check if this slot is available (not used and not occupied)
+        if not used_slots[slot] and not occupied_slots[slot] then
+            return slot
         end
     end
 

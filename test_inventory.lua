@@ -1,7 +1,7 @@
 -- Test script for the inventory management system
-local config = require("mint/config")
-local inventory = require("mint/inventory")
-local logger = require("mint/logger")
+local config = require("mint/config.lua")
+local inventory = require("mint/inventory.lua")
+local logger = require("mint/logger.lua")
 
 -- Set log level to debug for detailed output
 logger.set_level(logger.LEVELS.DEBUG)
@@ -169,12 +169,12 @@ function run_test()
 
     logger.info("Inventory created with configuration:")
     logger.info("  Ore slots: " ..
-    test_config.dotenv.ore_slots .. " (slots " .. inv.ore_sack.end_slot .. "-" .. inv.ore_sack.start_slot .. ")")
+        test_config.dotenv.ore_slots .. " (slots " .. inv.ore_sack.end_slot .. "-" .. inv.ore_sack.start_slot .. ")")
     logger.info("  Fuel slots: " ..
-    test_config.dotenv.fuel_slots .. " (slots " .. inv.fuel_sack.end_slot .. "-" .. inv.fuel_sack.start_slot .. ")")
+        test_config.dotenv.fuel_slots .. " (slots " .. inv.fuel_sack.end_slot .. "-" .. inv.fuel_sack.start_slot .. ")")
     logger.info("  Peripheral slots: " ..
-    test_config.dotenv.peripheral_slots ..
-    " (slots " .. inv.peripherals_sack.end_slot .. "-" .. inv.peripherals_sack.start_slot .. ")")
+        test_config.dotenv.peripheral_slots ..
+        " (slots " .. inv.peripherals_sack.end_slot .. "-" .. inv.peripherals_sack.start_slot .. ")")
 
     -- Add test items to the mock inventory
     add_item(1, "minecraft:iron_ore", 10)                    -- ore (slot 0)

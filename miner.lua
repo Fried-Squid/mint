@@ -1,7 +1,7 @@
 -- Main mining program
-local config = require("mint/config")
-local movement = require("mint/movement")
-local inventory = require("mint/inventory")
+local config = require("mint/config.lua")
+local movement = require("mint/movement.lua")
+local inventory = require("mint/inventory.lua")
 
 print("Miner initialization...")
 print("Miner ID: " .. config.dotenv.minerid)

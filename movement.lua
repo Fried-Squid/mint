@@ -1,6 +1,6 @@
 -- Movement module for the mining turtle
 local movement = {}
-local config = require("mint/config")
+local config = require("mint/config.lua")
 
 -- Ensure turtle API is available
 if not turtle and _G.turtle then

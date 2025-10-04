@@ -1,7 +1,12 @@
 -- Test script for the inventory management system
-local config = require("mint/config.lua")
-local inventory = require("mint/inventory.lua")
-local logger = require("mint/logger.lua")
+
+-- Fix module loading path for ComputerCraft
+package.path = package.path .. ";/?;/?.lua"
+
+-- Load modules
+local config = require("mint.config")
+local inventory = require("mint.inventory")
+local logger = require("mint.logger")
 
 -- Set log level to debug for detailed output
 logger.set_level(logger.LEVELS.DEBUG)

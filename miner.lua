@@ -1,7 +1,11 @@
 -- Main mining program
-local config = require("mint/config.lua")
-local movement = require("mint/movement.lua")
-local inventory = require("mint/inventory.lua")
+
+-- Fix module loading path for ComputerCraft
+package.path = package.path .. ";/?;/?.lua"
+
+local config = require("mint.config")
+local movement = require("mint.movement")
+local inventory = require("mint.inventory")
 
 print("Miner initialization...")
 print("Miner ID: " .. config.dotenv.minerid)

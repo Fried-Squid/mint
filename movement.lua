@@ -1,6 +1,10 @@
 -- Movement module for the mining turtle
 local movement = {}
-local config = require("mint/config.lua")
+
+-- Fix module loading path for ComputerCraft
+package.path = package.path .. ";/?;/?.lua"
+
+local config = require("mint.config")
 
 -- Ensure turtle API is available
 if not turtle and _G.turtle then

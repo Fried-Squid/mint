@@ -1,8 +1,12 @@
 -- Inventory module for the mining turtle
+
 -- Ensure we have access to the turtle API
 if not turtle and _G.turtle then
     turtle = _G.turtle
 end
+
+-- Set up module path
+package.path = package.path .. ";/?;/?.lua"
 -- Okay so to explain
 -- CC treats the inventory as a slot-based model but we effectively want buckets (sacks makes more contextual sense)
 -- When items come in they come in on the minimum free slot ONLY if they cant fill an existing sack.

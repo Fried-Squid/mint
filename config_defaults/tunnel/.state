@@ -1,0 +1,7 @@
+return {
+  xpos = 1160,
+  ypos = 71,
+  zpos = -1568,
+  zdir = 1,
+  id = "testtunnel1",
+}

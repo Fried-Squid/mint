@@ -94,14 +94,14 @@ local function ensureConfigs(mint_root)
         print("Created configs directory")
     end
 
+    -- Discover modules
+    local modules = discoverModules(mint_root)
+
     -- Return early if no modules found
     if #modules == 0 then
         print("Warning: No modules found in " .. mint_root)
         return true
     end
-
-    -- Discover modules
-    local modules = discoverModules(mint_root)
 
     -- Process each module's configurations
     for _, module in ipairs(modules) do
@@ -181,11 +181,11 @@ local function ensureConfigs(mint_root)
                                     template_content = result
                                 else
                                     print("Error loading template " ..
-                                    wanted_template .. ": " .. tostring(result or "unknown error"))
+                                        wanted_template .. ": " .. tostring(result or "unknown error"))
                                 end
                             else
                                 print("Error parsing template " ..
-                                wanted_template .. ": " .. tostring(err or "unknown error"))
+                                    wanted_template .. ": " .. tostring(err or "unknown error"))
                             end
 
                             -- Write new config file

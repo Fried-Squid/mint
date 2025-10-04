@@ -5,6 +5,30 @@ local config = require("config")
 -- Ensure we have access to the turtle API
 if not turtle and _G.turtle then
     turtle = _G.turtle
+elseif not turtle then
+    -- Create a mock turtle API for testing
+    turtle = {
+        getSelectedSlot = function() return 1 end,
+        select = function(slot)
+            print("Selected slot " .. slot)
+            return true
+        end,
+        getItemDetail = function(slot) return nil end, -- Will be populated during test
+        transferTo = function(slot)
+            print("Moving item to slot " .. slot)
+            return true
+        end,
+        drop = function()
+            print("Dropping item")
+            return true
+        end,
+        refuel = function()
+            print("Refueling")
+            return true
+        end,
+        getFuelLevel = function() return 500 end,
+        getFuelLimit = function() return 20000 end
+    }
 end
 
 print("=== Inventory Management Test ===")
@@ -21,7 +45,7 @@ local test_config = {
         peripheral_slots = 3,
         trash_types = { "minecraft:cobblestone", "minecraft:dirt", "minecraft:gravel", "minecraft:diorite", "minecraft:andesite", "minecraft:granite" },
         fuel_types = { "minecraft:lava_bucket", "minecraft:coal", "minecraft:charcoal", "minecraft:coal_block" },
-        peripheral_types = { "minecraft:diamond_pickaxe", "computercraft:wireless_modem_advanced", "advanced_peripherals:end_automata_core" }
+        peripheral_types = { "minecraft:diamond_pickaxe", "computercraft:wireless_modem_advanced", "advancedperipherals:end_automata_core" }
     }
 }
 
@@ -41,6 +65,26 @@ end
 -- Create inventory instance
 local inv = inventory.create(test_config)
 inventory.load_from_config(inv, test_config)
+
+-- Add some mock turtle functions if needed
+if not turtle.refuel then
+    turtle.refuel = function()
+        print("Mock: Refueling with current item")
+        return true
+    end
+end
+
+if not turtle.getFuelLevel then
+    turtle.getFuelLevel = function()
+        return 500
+    end
+end
+
+if not turtle.getFuelLimit then
+    turtle.getFuelLimit = function()
+        return 20000
+    end
+end
 
 -- Print configuration
 print("Inventory configuration:")
@@ -94,10 +138,20 @@ for i, item in ipairs(inv.peripherals_sack.contents) do
 end
 print()
 
-print("Trash (Dropped Items):")
+print("Trash Sack:")
 for i, item in ipairs(inv.trash_sack.contents) do
-    print(string.format("  %s (x%d) was dropped", item.name, item.qty))
+    print(string.format("  %s (x%d) in slot %d", item.name, item.qty, item.slot + 1))
 end
+print()
+
+-- Test refueling
+print("=== Testing Refueling ===")
+print("Current fuel level: " .. turtle.getFuelLevel())
+print("Attempting to refuel from fuel items...")
+local refueled = inventory.refuel(inv)
+print("Refueling success: " .. tostring(refueled))
+print("New fuel level: " .. turtle.getFuelLevel())
+print("Fuel percentage: " .. inventory.get_fuel_percentage(inv) .. "%")
 print()
 
 print("=== Inventory Test Complete ===")

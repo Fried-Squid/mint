@@ -89,7 +89,11 @@ function inventory.create(config)
     local peripheral_start = 16 - 1 -- 0-based, so 15 is the max slot
     local peripheral_end = peripheral_start - peripheral_slots + 1
 
-    local fuel_start = peripheral_end - 1
+    -- Add trash sack (2 slots) before peripherals
+    local trash_start = peripheral_end - 1
+    local trash_end = trash_start - 2 + 1
+
+    local fuel_start = trash_end - 1
     local fuel_end = fuel_start - fuel_slots + 1
 
     local ore_start = fuel_end - 1
@@ -102,8 +106,8 @@ function inventory.create(config)
         -- Specialized sacks with slot ranges
         ore_sack = inventory.create_sack(ore_slots, ore_start, ore_end),
         fuel_sack = inventory.create_sack(fuel_slots, fuel_start, fuel_end),
+        trash_sack = inventory.create_sack(2, trash_start, trash_end), -- Real slots for trash before peripherals
         peripherals_sack = inventory.create_sack(peripheral_slots, peripheral_start, peripheral_end),
-        trash_sack = inventory.create_sack(3, -1, -3), -- Special range to indicate not in main inventory
 
         -- Item classification lists
         trash_types = {},
@@ -146,6 +150,9 @@ function inventory.update(inv)
 
     -- 4. If trash sack is full, empty it (drop all items)
     inventory.check_trash_sack(inv)
+
+    -- 5. Check if fuel is needed and refuel if necessary
+    inventory.check_fuel(inv)
 end
 
 --[[
@@ -323,6 +330,7 @@ function inventory.process_sacks(inv)
 
         -- Check which sack this slot belongs to physically
         local in_peripheral_range = (slot >= inv.peripherals_sack.end_slot and slot <= inv.peripherals_sack.start_slot)
+        local in_trash_range = (slot >= inv.trash_sack.end_slot and slot <= inv.trash_sack.start_slot)
         local in_fuel_range = (slot >= inv.fuel_sack.end_slot and slot <= inv.fuel_sack.start_slot)
         local in_ore_range = (slot >= inv.ore_sack.end_slot and slot <= inv.ore_sack.start_slot)
 
@@ -338,24 +346,62 @@ function inventory.process_sacks(inv)
 
         -- Handle based on item type and current location
         if is_trash then
-            -- Add to trash sack for later processing
-            table.insert(inv.trash_sack.contents, {
-                name = name,
-                qty = item.qty,
-                slot = slot
-            })
-            inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
-            processed_slots[slot] = true
-        elseif is_peripheral then
-            if in_peripheral_range then
-                -- Item is already in the right sack
-                table.insert(inv.peripherals_sack.contents, {
+            if in_trash_range then
+                -- Item is already in the trash sack
+                table.insert(inv.trash_sack.contents, {
                     name = name,
                     qty = item.qty,
                     slot = slot
                 })
-                inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+                inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
                 processed_slots[slot] = true
+            else
+                -- Item needs to be moved to trash sack or dropped
+                local target_slot = inventory.find_slot_in_sack(inv, inv.trash_sack)
+                if target_slot then
+                    -- Move to trash sack
+                    if inventory.move_item(slot, target_slot) then
+                        table.insert(inv.trash_sack.contents, {
+                            name = name,
+                            qty = item.qty,
+                            slot = target_slot
+                        })
+                        inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
+                        processed_slots[slot] = true
+                        processed_slots[target_slot] = true
+                    end
+                else
+                    -- If trash sack is full, just drop it
+                    inventory.drop_item(slot)
+                    processed_slots[slot] = true
+                end
+            end
+        elseif is_peripheral then
+            if in_peripheral_range then
+                -- Check if the item is already at the highest available position
+                local highest_available = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
+                if highest_available and highest_available > slot then
+                    -- Move to a higher position
+                    if inventory.move_item(slot, highest_available) then
+                        table.insert(inv.peripherals_sack.contents, {
+                            name = name,
+                            qty = item.qty,
+                            slot = highest_available
+                        })
+                        inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+                        processed_slots[slot] = true
+                        processed_slots[highest_available] = true
+                    end
+                else
+                    -- Item is already at a good position
+                    table.insert(inv.peripherals_sack.contents, {
+                        name = name,
+                        qty = item.qty,
+                        slot = slot
+                    })
+                    inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+                    processed_slots[slot] = true
+                end
             else
                 -- Item needs to be moved to peripherals sack
                 local target_slot = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
@@ -374,14 +420,30 @@ function inventory.process_sacks(inv)
             end
         elseif is_fuel then
             if in_fuel_range then
-                -- Item is already in the right sack
-                table.insert(inv.fuel_sack.contents, {
-                    name = name,
-                    qty = item.qty,
-                    slot = slot
-                })
-                inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
-                processed_slots[slot] = true
+                -- Check if the item is already at the highest available position
+                local highest_available = inventory.find_slot_in_sack(inv, inv.fuel_sack)
+                if highest_available and highest_available > slot then
+                    -- Move to a higher position
+                    if inventory.move_item(slot, highest_available) then
+                        table.insert(inv.fuel_sack.contents, {
+                            name = name,
+                            qty = item.qty,
+                            slot = highest_available
+                        })
+                        inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+                        processed_slots[slot] = true
+                        processed_slots[highest_available] = true
+                    end
+                else
+                    -- Item is already at a good position
+                    table.insert(inv.fuel_sack.contents, {
+                        name = name,
+                        qty = item.qty,
+                        slot = slot
+                    })
+                    inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+                    processed_slots[slot] = true
+                end
             else
                 -- Item needs to be moved to fuel sack
                 local target_slot = inventory.find_slot_in_sack(inv, inv.fuel_sack)
@@ -401,14 +463,30 @@ function inventory.process_sacks(inv)
         else
             -- Treat as ore
             if in_ore_range then
-                -- Item is already in the right sack
-                table.insert(inv.ore_sack.contents, {
-                    name = name,
-                    qty = item.qty,
-                    slot = slot
-                })
-                inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
-                processed_slots[slot] = true
+                -- Check if the item is already at the highest available position
+                local highest_available = inventory.find_slot_in_sack(inv, inv.ore_sack)
+                if highest_available and highest_available > slot then
+                    -- Move to a higher position
+                    if inventory.move_item(slot, highest_available) then
+                        table.insert(inv.ore_sack.contents, {
+                            name = name,
+                            qty = item.qty,
+                            slot = highest_available
+                        })
+                        inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+                        processed_slots[slot] = true
+                        processed_slots[highest_available] = true
+                    end
+                else
+                    -- Item is already at a good position
+                    table.insert(inv.ore_sack.contents, {
+                        name = name,
+                        qty = item.qty,
+                        slot = slot
+                    })
+                    inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+                    processed_slots[slot] = true
+                end
             else
                 -- Item needs to be moved to ore sack
                 local target_slot = inventory.find_slot_in_sack(inv, inv.ore_sack)
@@ -433,10 +511,15 @@ end
 -- Process unassigned items in raw_contents
 function inventory.process_unassigned(inv)
     -- Track slots that are now part of a sack
+    -- Track which slots we've already processed
     local assigned_slots = {}
 
     -- Mark all slots in sacks as assigned
     for _, item in ipairs(inv.peripherals_sack.contents) do
+        assigned_slots[item.slot] = true
+    end
+
+    for _, item in ipairs(inv.trash_sack.contents) do
         assigned_slots[item.slot] = true
     end
 
@@ -445,10 +528,6 @@ function inventory.process_unassigned(inv)
     end
 
     for _, item in ipairs(inv.ore_sack.contents) do
-        assigned_slots[item.slot] = true
-    end
-
-    for _, item in ipairs(inv.trash_sack.contents) do
         assigned_slots[item.slot] = true
     end
 
@@ -534,11 +613,8 @@ end
 function inventory.empty_trash_sack(inv)
     -- Drop every item in the trash sack
     for _, item in ipairs(inv.trash_sack.contents) do
-        -- If the item has a real slot (not virtual)
-        if item.slot >= 0 then
-            -- Drop the item
-            inventory.drop_item(item.slot)
-        end
+        -- Drop the item from its slot
+        inventory.drop_item(item.slot)
     end
 
     -- Clear the trash sack contents
@@ -548,6 +624,48 @@ function inventory.empty_trash_sack(inv)
     inv.trash_sack.used_slots = 0
 
     print("Trash sack emptied")
+end
+
+-- Check fuel level and refuel if needed
+function inventory.check_fuel(inv)
+    -- Get current fuel level
+    local fuel_level = turtle.getFuelLevel()
+
+    -- If fuel is unlimited, no need to refuel
+    if fuel_level == "unlimited" then
+        return
+    end
+
+    -- Check if we need to refuel (below threshold)
+    if fuel_level < 1000 then
+        inventory.refuel(inv)
+    end
+end
+
+-- Refuel the turtle from items in the fuel sack
+function inventory.refuel(inv)
+    local original_slot = turtle.getSelectedSlot()
+    local refueled = false
+
+    -- Try to refuel from fuel sack
+    for _, item in ipairs(inv.fuel_sack.contents) do
+        -- Skip buckets (we don't want to consume these)
+        if not string.find(item.name, "bucket") then
+            -- Select the fuel item
+            turtle.select(item.slot + 1)
+
+            -- Try to refuel with it
+            if turtle.refuel() then
+                print("Refueled with " .. item.name)
+                refueled = true
+            end
+        end
+    end
+
+    -- Return to original slot
+    turtle.select(original_slot)
+
+    return refueled
 end
 
 -- Load item classification lists and slot configuration from .env
@@ -566,7 +684,11 @@ function inventory.load_from_config(inv, config)
     local peripheral_start = 16 - 1 -- 0-based, so 15 is the max slot
     local peripheral_end = peripheral_start - peripheral_slots + 1
 
-    local fuel_start = peripheral_end - 1
+    -- Add trash sack (2 slots) before peripherals
+    local trash_start = peripheral_end - 1
+    local trash_end = trash_start - 2 + 1
+
+    local fuel_start = trash_end - 1
     local fuel_end = fuel_start - fuel_slots + 1
 
     local ore_start = fuel_end - 1
@@ -580,6 +702,10 @@ function inventory.load_from_config(inv, config)
     inv.fuel_sack.slots_max = fuel_slots
     inv.fuel_sack.start_slot = fuel_start
     inv.fuel_sack.end_slot = fuel_end
+
+    inv.trash_sack.slots_max = 2
+    inv.trash_sack.start_slot = trash_start
+    inv.trash_sack.end_slot = trash_end
 
     inv.peripherals_sack.slots_max = peripheral_slots
     inv.peripherals_sack.start_slot = peripheral_start
@@ -716,6 +842,20 @@ function inventory.equip(inv, item_name)
 
     -- Item not found in peripherals sack
     return false
+end
+
+-- Get fuel level as a percentage of maximum
+function inventory.get_fuel_percentage(inv)
+    local fuel_level = turtle.getFuelLevel()
+    local fuel_limit = turtle.getFuelLimit()
+
+    -- Handle unlimited fuel
+    if fuel_level == "unlimited" then
+        return 100
+    end
+
+    -- Calculate percentage
+    return math.floor((fuel_level / fuel_limit) * 100)
 end
 
 -- Return the module

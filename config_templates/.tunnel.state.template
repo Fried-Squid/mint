@@ -1,7 +1,0 @@
-return {
-    xpos = "number",
-    ypos = "number",
-    zpos = "number",
-    zdir = "number",
-    id = "string"
-}

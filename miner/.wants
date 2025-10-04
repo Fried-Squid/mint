@@ -1,5 +1,0 @@
-return {
-  ".tunnel.state",
-  ".miner.state",
-  ".miner.env"
-}

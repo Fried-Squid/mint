@@ -1,238 +1,103 @@
--- Test script for the inventory management system
-
--- Load modules directly
-local config = require("config")
+-- Simple test script for inventory management system on a real turtle
 local inventory = require("inventory")
-local logger = require("logger")
+local config = require("config")
 
--- Set log level to debug for detailed output
-logger.set_level(logger.LEVELS.DEBUG)
+-- Ensure we have access to the turtle API
+if not turtle and _G.turtle then
+    turtle = _G.turtle
+end
 
--- Mock turtle API for testing without an actual turtle
-local mock_turtle = {}
+print("=== Inventory Management Test ===")
+print("This test will organize your turtle's inventory")
+print("Place items in the turtle before running")
+print()
 
--- Mock inventory state
-local mock_inventory = {}
-
--- Initialize mock inventory
-function init_mock()
-    logger.info("Initializing mock turtle environment")
-
-    -- Create a mock inventory with some items
-    mock_inventory = {}
-    for i = 1, 16 do
-        mock_inventory[i] = nil -- Empty slots
-    end
-
-    -- Override turtle functions we'll use
-    _G._original_turtle = _G.turtle
-    _G.turtle = {
-        getItemDetail = function(slot)
-            return mock_inventory[slot]
-        end,
-
-        select = function(slot)
-            logger.debug("Mock: Selected slot " .. slot)
-            return true
-        end,
-
-        transferTo = function(to_slot)
-            local current_slot = nil
-            for i = 1, 16 do
-                if mock_inventory[i] and mock_inventory[i]._selected then
-                    current_slot = i
-                    break
-                end
-            end
-
-            if current_slot then
-                logger.info("Mock: Moving item from slot " .. current_slot .. " to " .. to_slot)
-                mock_inventory[to_slot] = mock_inventory[current_slot]
-                mock_inventory[current_slot] = nil
-                mock_inventory[to_slot]._selected = false
-                return true
-            else
-                logger.error("Mock: No slot selected for transfer")
-                return false
-            end
-        end,
-
-        drop = function()
-            local current_slot = nil
-            for i = 1, 16 do
-                if mock_inventory[i] and mock_inventory[i]._selected then
-                    current_slot = i
-                    break
-                end
-            end
-
-            if current_slot then
-                logger.info("Mock: Dropping item from slot " .. current_slot)
-                mock_inventory[current_slot] = nil
-                return true
-            else
-                logger.error("Mock: No slot selected for dropping")
-                return false
-            end
-        end,
-
-        equipLeft = function()
-            local current_slot = nil
-            for i = 1, 16 do
-                if mock_inventory[i] and mock_inventory[i]._selected then
-                    current_slot = i
-                    break
-                end
-            end
-
-            if current_slot then
-                logger.info("Mock: Equipped item from slot " .. current_slot .. " on left side")
-                return true
-            else
-                logger.error("Mock: No slot selected for equipping")
-                return false
-            end
-        end,
-
-        equipRight = function()
-            local current_slot = nil
-            for i = 1, 16 do
-                if mock_inventory[i] and mock_inventory[i]._selected then
-                    current_slot = i
-                    break
-                end
-            end
-
-            if current_slot then
-                logger.info("Mock: Equipped item from slot " .. current_slot .. " on right side")
-                return true
-            else
-                logger.error("Mock: No slot selected for equipping")
-                return false
-            end
-        end
+-- Initialize test config
+local test_config = {
+    dotenv = {
+        minerid = "test_turtle",
+        ore_slots = 10,
+        fuel_slots = 3,
+        peripheral_slots = 3,
+        trash_types = { "minecraft:cobblestone", "minecraft:dirt", "minecraft:gravel", "minecraft:diorite", "minecraft:andesite", "minecraft:granite" },
+        fuel_types = { "minecraft:lava_bucket", "minecraft:coal", "minecraft:charcoal", "minecraft:coal_block" },
+        peripheral_types = { "minecraft:diamond_pickaxe", "computercraft:wireless_modem_advanced", "advanced_peripherals:end_automata_core" }
     }
-end
+}
 
--- Restore original turtle API
-function cleanup_mock()
-    if _G._original_turtle then
-        _G.turtle = _G._original_turtle
-        _G._original_turtle = nil
-    end
-    logger.info("Restored original turtle environment")
-end
-
--- Add an item to the mock inventory
-function add_item(slot, name, count)
-    mock_inventory[slot] = {
-        name = name,
-        count = count or 1,
-        _selected = false
-    }
-    logger.debug("Added " .. name .. " (x" .. (count or 1) .. ") to slot " .. slot)
-end
-
--- Print the current state of the mock inventory
+-- Print current inventory state
 function print_inventory()
-    logger.info("Current Mock Inventory:")
-    for i = 1, 16 do
-        if mock_inventory[i] then
-            logger.info("  Slot " .. i .. ": " .. mock_inventory[i].name .. " (x" .. mock_inventory[i].count .. ")")
+    print("Current Inventory:")
+    for slot = 1, 16 do
+        local item = turtle.getItemDetail(slot)
+        if item then
+            print(string.format("  Slot %2d: %s (x%d)", slot, item.name, item.count))
         else
-            logger.debug("  Slot " .. i .. ": empty")
+            print(string.format("  Slot %2d: empty", slot))
         end
     end
 end
 
--- Test the inventory management system
-function run_test()
-    logger.info("=== Starting Inventory Test ===")
+-- Create inventory instance
+local inv = inventory.create(test_config)
+inventory.load_from_config(inv, test_config)
 
-    -- Initialize mock environment
-    init_mock()
+-- Print configuration
+print("Inventory configuration:")
+print(string.format("  Ore slots: %d (slots %d-%d)",
+    test_config.dotenv.ore_slots,
+    inv.ore_sack.end_slot + 1,
+    inv.ore_sack.start_slot + 1))
+print(string.format("  Fuel slots: %d (slots %d-%d)",
+    test_config.dotenv.fuel_slots,
+    inv.fuel_sack.end_slot + 1,
+    inv.fuel_sack.start_slot + 1))
+print(string.format("  Peripheral slots: %d (slots %d-%d)",
+    test_config.dotenv.peripheral_slots,
+    inv.peripherals_sack.end_slot + 1,
+    inv.peripherals_sack.start_slot + 1))
+print()
 
-    -- Initialize config with test values
-    local test_config = {
-        dotenv = {
-            minerid = "test_turtle",
-            ore_slots = 10,
-            fuel_slots = 3,
-            peripheral_slots = 3,
-            trash_types = { "minecraft:cobblestone", "minecraft:dirt", "minecraft:gravel" },
-            fuel_types = { "minecraft:lava_bucket", "minecraft:coal" },
-            peripheral_types = { "minecraft:diamond_pickaxe", "computercraft:wireless_modem_advanced" }
-        }
-    }
+-- Show initial inventory state
+print("Initial inventory state:")
+print_inventory()
+print()
 
-    -- Create inventory instance
-    local inv = inventory.create(test_config)
-    inventory.load_from_config(inv, test_config)
+-- Run inventory update
+print("Organizing inventory...")
+inventory.update(inv)
 
-    logger.info("Inventory created with configuration:")
-    logger.info("  Ore slots: " ..
-        test_config.dotenv.ore_slots .. " (slots " .. inv.ore_sack.end_slot .. "-" .. inv.ore_sack.start_slot .. ")")
-    logger.info("  Fuel slots: " ..
-        test_config.dotenv.fuel_slots .. " (slots " .. inv.fuel_sack.end_slot .. "-" .. inv.fuel_sack.start_slot .. ")")
-    logger.info("  Peripheral slots: " ..
-        test_config.dotenv.peripheral_slots ..
-        " (slots " .. inv.peripherals_sack.end_slot .. "-" .. inv.peripherals_sack.start_slot .. ")")
+-- Show final inventory state
+print()
+print("Final inventory state after processing:")
+print_inventory()
+print()
 
-    -- Add test items to the mock inventory
-    add_item(1, "minecraft:iron_ore", 10)                    -- ore (slot 0)
-    add_item(2, "minecraft:coal", 5)                         -- fuel (slot 1)
-    add_item(3, "minecraft:diamond", 3)                      -- ore (slot 2)
-    add_item(4, "minecraft:cobblestone", 64)                 -- trash (slot 3)
-    add_item(5, "minecraft:dirt", 32)                        -- trash (slot 4)
-    add_item(6, "minecraft:diamond_pickaxe", 1)              -- peripheral (slot 5)
-    add_item(15, "minecraft:lava_bucket", 1)                 -- fuel (slot 14)
-    add_item(16, "computercraft:wireless_modem_advanced", 1) -- peripheral (slot 15)
+-- Print categorized items
+print("=== Items After Categorization ===")
 
-    -- Show initial state
-    logger.info("Initial mock inventory state:")
-    print_inventory()
-
-    -- Run inventory update
-    logger.info("Running inventory.update()...")
-    inventory.update(inv)
-
-    -- Show final state
-    logger.info("Final mock inventory state after processing:")
-    print_inventory()
-
-    -- Check sack contents
-    logger.info("=== Sack Contents After Processing ===")
-
-    logger.info("Ore Sack:")
-    for i, item in ipairs(inv.ore_sack.contents) do
-        logger.info("  " .. item.name .. " (x" .. item.qty .. ") in slot " .. item.slot)
-    end
-
-    logger.info("Fuel Sack:")
-    for i, item in ipairs(inv.fuel_sack.contents) do
-        logger.info("  " .. item.name .. " (x" .. item.qty .. ") in slot " .. item.slot)
-    end
-
-    logger.info("Peripherals Sack:")
-    for i, item in ipairs(inv.peripherals_sack.contents) do
-        logger.info("  " .. item.name .. " (x" .. item.qty .. ") in slot " .. item.slot)
-    end
-
-    logger.info("Trash Sack:")
-    for i, item in ipairs(inv.trash_sack.contents) do
-        logger.info("  " .. item.name .. " (x" .. item.qty .. ") in slot " .. item.slot)
-    end
-
-    -- Test equipping a peripheral
-    logger.info("Testing equip function with diamond pickaxe")
-    local equip_result = inventory.equip(inv, "minecraft:diamond_pickaxe")
-    logger.info("Equip result: " .. tostring(equip_result))
-    logger.info("Equipped item: " .. tostring(inv.equipped))
-
-    -- Cleanup
-    cleanup_mock()
-    logger.info("=== Inventory Test Complete ===")
+print("Ore Sack:")
+for i, item in ipairs(inv.ore_sack.contents) do
+    print(string.format("  %s (x%d) in slot %d", item.name, item.qty, item.slot + 1))
 end
+print()
 
--- Run the test
-run_test()
+print("Fuel Sack:")
+for i, item in ipairs(inv.fuel_sack.contents) do
+    print(string.format("  %s (x%d) in slot %d", item.name, item.qty, item.slot + 1))
+end
+print()
+
+print("Peripherals Sack:")
+for i, item in ipairs(inv.peripherals_sack.contents) do
+    print(string.format("  %s (x%d) in slot %d", item.name, item.qty, item.slot + 1))
+end
+print()
+
+print("Trash (Dropped Items):")
+for i, item in ipairs(inv.trash_sack.contents) do
+    print(string.format("  %s (x%d) was dropped", item.name, item.qty))
+end
+print()
+
+print("=== Inventory Test Complete ===")

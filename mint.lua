@@ -1,38 +1,10 @@
 -- Mint - Main Wrapper Script
 -- This script provides a simple interface for running mint modules in ComputerCraft
 
--- Utility functions for paths
-local function joinPath(...)
-    return table.concat({ ... }, "/"):gsub("//", "/")
-end
-
--- Find the mint root directory
-local function findMintRoot()
-    local current_dir = shell.dir()
-
-    -- Check if we're in the mint directory
-    if fs.exists(joinPath(current_dir, "mintlib")) then
-        return current_dir
-    end
-
-    -- Check if mint is a subdirectory
-    if fs.exists(joinPath(current_dir, "mint", "mintlib")) then
-        return joinPath(current_dir, "mint")
-    end
-
-    -- Check if mint is in the root
-    if fs.exists("/mint/mintlib") then
-        return "/mint"
-    end
-
-    -- Not found
-    return nil
-end
-
--- Discover available modules by scanning directories
-local function discoverModules(mint_root)
+-- 1. Module discovery
+function discoverModules(mintRoot)
     local modules = {}
-    local system_dirs = {
+    local systemDirs = {
         ["config_defaults"] = true,
         ["config_templates"] = true,
         ["configs"] = true,
@@ -40,13 +12,13 @@ local function discoverModules(mint_root)
     }
 
     -- List the root directories
-    local items = fs.list(mint_root)
+    local items = fs.list(mintRoot)
     for _, item in ipairs(items) do
-        local path = joinPath(mint_root, item)
+        local path = fs.combine(mintRoot, item)
         -- Skip system directories and files
-        if fs.isDir(path) and not system_dirs[item] and item:sub(1, 1) ~= "." then
+        if fs.isDir(path) and not systemDirs[item] and item:sub(1, 1) ~= "." then
             -- Check if this directory has a main.lua file
-            if fs.exists(joinPath(path, "main.lua")) then
+            if fs.exists(fs.combine(path, "main.lua")) then
                 table.insert(modules, item)
             end
         end
@@ -55,408 +27,251 @@ local function discoverModules(mint_root)
     return modules
 end
 
--- Get a module's wanted configs
-local function getModuleWants(mint_root, module_name)
+function findWants(modulePath, mintRoot)
+    local missing = {}
+    local wantsPath = fs.combine(modulePath, ".wants")
+
+    -- Check if .wants file exists
+    if not fs.exists(wantsPath) then
+        return missing
+    end
+
+    -- Load .wants file
+    local wantsFile = fs.open(wantsPath, "r")
+    if not wantsFile then
+        return missing
+    end
+
+    local content = wantsFile.readAll()
+    wantsFile.close()
+
+    -- Parse the wants file
     local wants = {}
-    local wants_path = joinPath(mint_root, module_name, ".wants")
+    local success, result = pcall(function()
+        return load("return " .. content)()
+    end)
 
-    if fs.exists(wants_path) then
-        local file = fs.open(wants_path, "r")
-        if file then
-            local content = file.readAll()
-            file.close()
+    if success and type(result) == "table" then
+        wants = result
+    else
+        print("Warning: Could not parse .wants file for " .. modulePath)
+        return missing
+    end
 
-            -- Try to load the wants file
-            local fn, err = load("return " .. content)
-            if fn then
-                local success, result = pcall(fn)
-                if success and type(result) == "table" then
-                    wants = result
-                else
-                    print("Warning: Error loading .wants file for " .. module_name)
-                end
-            else
-                print("Warning: Error parsing .wants file for " .. module_name)
-            end
+    -- Check for each wanted config
+    for _, configName in ipairs(wants) do
+        -- Remove leading dot if present
+        local fileName = configName:match("^%.(.+)") or configName
+
+        -- Check if it exists in configs
+        local configsPath = fs.combine(mintRoot, "mint/configs", fs.getName(modulePath))
+        local configPath = fs.combine(configsPath, fileName)
+
+        if not fs.exists(configPath) then
+            table.insert(missing, configName)
         end
     end
 
-    return wants
+    return missing
 end
 
--- Ensure config directories exist
-local function ensureConfigs(mint_root)
-    local configs_dir = joinPath(mint_root, "configs")
+function copyDefault(configName, moduleDir, mintRoot)
+    -- Format: .module.config or just .config
+    local defaultPath = fs.combine(mintRoot, "config_defaults", configName)
 
-    -- Create main configs directory if needed
-    if not fs.exists(configs_dir) then
-        fs.makeDir(configs_dir)
-        print("Created configs directory")
+    -- Check if default exists
+    if not fs.exists(defaultPath) then
+        print("Warning: Default config " .. configName .. " not found")
+        return false
     end
 
-    -- Discover modules
-    local modules = discoverModules(mint_root)
-
-    -- Return early if no modules found
-    if #modules == 0 then
-        print("Warning: No modules found in " .. mint_root)
-        return true
+    -- Determine target directory
+    local configsDir = fs.combine(mintRoot, "mint/configs", moduleDir)
+    if not fs.exists(configsDir) then
+        fs.makeDir(configsDir)
     end
 
-    -- Process each module's configurations
-    for _, module in ipairs(modules) do
-        local module_config_dir = joinPath(configs_dir, module)
+    -- Strip leading dot for target filename
+    local targetName = configName:match("^%.(.+)") or configName
+    local targetPath = fs.combine(configsDir, targetName)
 
-        -- Create the module config directory if needed
-        if not fs.exists(module_config_dir) then
-            fs.makeDir(module_config_dir)
-            print("Created config directory for " .. module)
-        end
-
-        -- Get list of configs this module wants
-        local wanted_configs = getModuleWants(mint_root, module)
-
-        -- Process module-specific configs
-        local defaults_dir = joinPath(mint_root, "config_defaults")
-        if fs.exists(defaults_dir) then
-            -- Look for files starting with .module.
-            for _, file in ipairs(fs.list(defaults_dir)) do
-                if file:match("^%." .. module .. "%.") then
-                    local src_path = joinPath(defaults_dir, file)
-                    local dest_path = joinPath(module_config_dir, file:sub(2)) -- Remove leading dot
-
-                    if fs.exists(src_path) and not fs.isDir(src_path) then
-                        if not fs.exists(dest_path) then
-                            fs.copy(src_path, dest_path)
-                            print("Copied default config: " .. file .. " for " .. module)
-                        end
-                    end
-                end
-            end
-
-            -- Process configs wanted by this module
-            for _, wanted_config in ipairs(wanted_configs) do
-                -- Only process if not already module-specific
-                if not wanted_config:match("^%." .. module .. "%.") then
-                    local src_path = joinPath(defaults_dir, wanted_config)
-                    local dest_path = joinPath(module_config_dir, wanted_config:sub(2)) -- Remove leading dot
-
-                    if fs.exists(src_path) and not fs.isDir(src_path) then
-                        if not fs.exists(dest_path) then
-                            fs.copy(src_path, dest_path)
-                            print("Copied wanted config: " .. wanted_config .. " for " .. module)
-                        end
-                    else
-                        print("Warning: Wanted config " .. wanted_config .. " not found in defaults")
-                    end
-                end
-            end
-        end
-
-        -- Check for template configs
-        local templates_dir = joinPath(mint_root, "config_templates")
-        if fs.exists(templates_dir) then
-            -- Look for any templates related to this module
-            for _, template_name in ipairs(fs.list(templates_dir)) do
-                if template_name:match("^%." .. module .. "%.(.+)%.template$") then
-                    local config_type = template_name:match("^%." .. module .. "%.(.+)%.template$")
-                    local template_path = joinPath(templates_dir, template_name)
-                    local config_path = joinPath(module_config_dir, "." .. module .. "." .. config_type)
-
-                    if fs.exists(template_path) and not fs.exists(config_path) then
-                        print("Setting up " .. config_path .. " from template")
-
-                        -- Load the template
-                        local template_content = {}
-                        local file = fs.open(template_path, "r")
-                        if file then
-                            local content = file.readAll()
-                            file.close()
-
-                            -- Safely execute the template content to get the table
-                            local fn, err = load("return " .. content)
-                            if fn then
-                                local success, result = pcall(fn)
-                                if success and result then
-                                    template_content = result
-                                else
-                                    print("Error loading template " ..
-                                        wanted_template .. ": " .. tostring(result or "unknown error"))
-                                end
-                            else
-                                print("Error parsing template " ..
-                                    wanted_template .. ": " .. tostring(err or "unknown error"))
-                            end
-
-                            -- Write new config file
-                            file = fs.open(config_path, "w")
-                            if file then
-                                file.write("return {\n")
-                                for key, value_type in pairs(template_content) do
-                                    local default_value
-
-                                    -- Set sensible defaults based on type
-                                    if value_type == "string" then
-                                        default_value = '""'
-                                    elseif value_type == "number" then
-                                        default_value = "0"
-                                    elseif value_type == "boolean" then
-                                        default_value = "false"
-                                    else
-                                        default_value = "nil"
-                                    end
-
-                                    file.write("    " .. key .. " = " .. default_value .. ",\n")
-                                end
-                                file.write("}\n")
-                                file.close()
-                                print("Created config file: " .. config_path)
-                            end
-                        end
-                    end
-                end
-
-                -- Process wanted templates
-                for _, wanted_config in ipairs(wanted_configs) do
-                    -- Find matching template
-                    local wanted_template = wanted_config .. ".template"
-                    local template_path = joinPath(templates_dir, wanted_template)
-                    local config_path = joinPath(module_config_dir, wanted_config:sub(2)) -- Remove leading dot
-
-                    if fs.exists(template_path) and not fs.exists(config_path) then
-                        print("Setting up " .. config_path .. " from wanted template " .. wanted_template)
-
-                        -- Load the template
-                        local template_content = {}
-                        local file = fs.open(template_path, "r")
-                        if file then
-                            local content = file.readAll()
-                            file.close()
-
-                            -- Safely execute the template content to get the table
-                            local fn, err = load("return " .. content)
-                            if fn then
-                                local success, result = pcall(fn)
-                                if success and result then
-                                    template_content = result
-                                else
-                                    print("Error loading template: " .. (result or "unknown error"))
-                                end
-                            else
-                                print("Error parsing template: " .. (err or "unknown error"))
-                            end
-
-                            -- Write new config file
-                            file = fs.open(config_path, "w")
-                            file.write("return {\n")
-                            for key, value_type in pairs(template_content) do
-                                local default_value
-
-                                -- Set sensible defaults based on type
-                                if value_type == "string" then
-                                    default_value = '""'
-                                elseif value_type == "number" then
-                                    default_value = "0"
-                                elseif value_type == "boolean" then
-                                    default_value = "false"
-                                else
-                                    default_value = "nil"
-                                end
-
-                                file.write("    " .. key .. " = " .. default_value .. ",\n")
-                            end
-                            file.write("}\n")
-                            file.close()
-                            print("Created wanted config file: " .. config_path)
-                        else
-                            print("Error: Could not open " .. config_path .. " for writing")
-                        end
-                    end
-                end
-            end
-        end
-    end
+    -- Copy the file
+    fs.copy(defaultPath, targetPath)
+    print("Copied " .. configName .. " to " .. targetPath)
 
     return true
 end
 
--- Load a module
-local function loadModule(mint_root, module_name)
-    local module_path = joinPath(mint_root, module_name, "main")
-    local old_package_path = package.path
-
-    -- Temporarily modify package path to include the mint root
-    package.path = joinPath(mint_root, "?.lua") .. ";" ..
-        joinPath(mint_root, "?/init.lua") .. ";" ..
-        package.path
-
-    -- Try to require the module
-    local success, module = pcall(function()
-        return require(module_path)
-    end)
-
-    -- If main.lua doesn't exist or doesn't have a run function,
-    -- try to load the module directly
-    if not success or not module then
-        success, module = pcall(function()
-            return require(module_name)
-        end)
-    end
-
-    -- Restore package path
-    package.path = old_package_path
-
-    if success and module then
-        return module
-    else
-        print("Error loading module '" .. module_name .. "': " .. tostring(module or "unknown error"))
-        return nil
-    end
-end
-
--- Main run function
+-- Main function to run modules
 local function run(...)
     local args = { ... }
 
-    -- Find mint root
-    local mint_root = findMintRoot()
-    if not mint_root then
-        print("Error: Could not find mint installation")
-        return false
-    end
-
-    -- Switch to mint root directory
-    local old_dir = shell.dir()
-    shell.setDir(mint_root)
-
-    -- No arguments, show help
     if #args < 1 then
         print("Usage: mint run <module> [arguments]")
-        local modules = discoverModules(mint_root)
-        print("Available modules: " .. table.concat(modules, ", "))
-        shell.setDir(old_dir)
         return false
     end
 
     local command = args[1]
 
+    -- Handle commands
     if command == "run" then
         if #args < 2 then
             print("Usage: mint run <module> [arguments]")
-            local modules = discoverModules(mint_root)
-            print("Available modules: " .. table.concat(modules, ", "))
-            shell.setDir(old_dir)
             return false
         end
 
-        local module_name = args[2]
-        local modules = discoverModules(mint_root)
-        local module_found = false
+        local moduleName = args[2]
+        local moduleArgs = {}
+
+        for i = 3, #args do
+            table.insert(moduleArgs, args[i])
+        end
+
+        -- Find the mint root directory
+        local currentDir = shell.dir()
+        local mintRoot = nil
+
+        -- Check if we're in the mint directory
+        if fs.exists(fs.combine(currentDir, "mintlib")) then
+            mintRoot = currentDir
+            -- Check if mint is in a subdirectory
+        elseif fs.exists(fs.combine(currentDir, "mint", "mintlib")) then
+            mintRoot = fs.combine(currentDir, "mint")
+            shell.setDir(mintRoot)
+            -- Check if mint is in root
+        elseif fs.exists("/mint/mintlib") then
+            mintRoot = "/mint"
+            shell.setDir(mintRoot)
+        end
+
+        if not mintRoot then
+            print("Error: Could not find mint installation")
+            return false
+        end
+
+        -- Get modules
+        local modules = discoverModules(mintRoot)
+        local moduleFound = false
 
         for _, m in ipairs(modules) do
-            if m == module_name then
-                module_found = true
+            if m == moduleName then
+                moduleFound = true
                 break
             end
         end
 
-        -- If not found, check if there are any configs for this module
-        -- This handles special modules like 'tunnel' that might not have code
-        if not module_found and fs.exists(joinPath(mint_root, "config_defaults")) then
-            for _, file in ipairs(fs.list(joinPath(mint_root, "config_defaults"))) do
-                if file:match("^%." .. module_name .. "%.") then
-                    module_found = true
-                    break
-                end
-            end
-        end
-
-        if not module_found then
-            print("Error: Module '" .. module_name .. "' not found")
-            if #modules > 0 then
-                print("Available modules: " .. table.concat(modules, ", "))
-            else
-                print("No modules found in " .. mint_root)
-            end
-            shell.setDir(old_dir)
+        if not moduleFound then
+            print("Error: Module '" .. moduleName .. "' not found")
+            print("Available modules: " .. table.concat(modules, ", "))
             return false
         end
 
-        -- Ensure configs
-        ensureConfigs(mint_root)
+        -- Ensure configs directory exists
+        local configPath = fs.combine(mintRoot, "mint/configs")
+        if not fs.exists(configPath) then
+            fs.makeDir(configPath)
+        end
 
-        -- Load the module
-        local module = loadModule(mint_root, module_name)
-        if not module then
-            shell.setDir(old_dir)
+        -- Check for module config directory
+        local moduleConfigDir = fs.combine(mintRoot, "mint/configs", moduleName)
+        if not fs.exists(moduleConfigDir) then
+            fs.makeDir(moduleConfigDir)
+        end
+
+        -- Check module wants
+        local modulePath = fs.combine(mintRoot, moduleName)
+        local missing = findWants(modulePath, mintRoot)
+
+        -- Copy default configs for missing wants
+        for _, configName in ipairs(missing) do
+            copyDefault(configName, moduleName, mintRoot)
+        end
+
+        -- Load and run the module
+        local modulePath = fs.combine(moduleName, "main")
+        -- Temporarily modify package path to include mint root
+        local oldPath = package.path
+        package.path = fs.combine(mintRoot, "?.lua") .. ";" ..
+            fs.combine(mintRoot, "?/init.lua") .. ";" ..
+            package.path
+        local success, module = pcall(require, modulePath)
+
+        -- Restore package path
+        package.path = oldPath
+
+        if not success or not module then
+            print("Error loading module: " .. tostring(module))
             return false
         end
 
-        -- Get remaining arguments
-        local module_args = {}
-        for i = 3, #args do
-            table.insert(module_args, args[i])
-        end
-
-        -- Run the module
-        print("Running " .. module_name .. "...")
-        local success, result
-        if module.run then
-            success, result = pcall(module.run, table.unpack(module_args))
-        else
-            print("Error: Module '" .. module_name .. "' doesn't have a 'run' function")
-            success = false
-        end
-
-        -- Restore directory
-        shell.setDir(old_dir)
-
-        if not success then
-            print("Error running " .. module_name .. ": " .. tostring(result))
+        if type(module.run) ~= "function" then
+            print("Error: Module doesn't have a 'run' function")
             return false
         end
 
-        return result
+        return module.run(table.unpack(moduleArgs))
     elseif command == "setup" then
-        -- Just setup configs
-        local result = ensureConfigs(mint_root)
-        print("Mint setup " .. (result and "completed successfully" or "failed"))
-        shell.setDir(old_dir)
-        return result
-    elseif command == "list" then
-        -- List available modules
-        local modules = discoverModules(mint_root)
-        print("Available modules: ")
-        for _, module in ipairs(modules) do
-            print("  - " .. module)
+        -- Find mint root
+        local currentDir = shell.dir()
+        local mintRoot = nil
+
+        if fs.exists(fs.combine(currentDir, "mintlib")) then
+            mintRoot = currentDir
+        elseif fs.exists(fs.combine(currentDir, "mint", "mintlib")) then
+            mintRoot = fs.combine(currentDir, "mint")
+        elseif fs.exists("/mint/mintlib") then
+            mintRoot = "/mint"
         end
-        shell.setDir(old_dir)
+
+        if not mintRoot then
+            print("Error: Could not find mint installation")
+            return false
+        end
+
+        -- Create configs directory if needed
+        local configsDir = fs.combine(mintRoot, "mint/configs")
+        if not fs.exists(configsDir) then
+            fs.makeDir(configsDir)
+            print("Created configs directory")
+        end
+
+        -- Process each module
+        local modules = discoverModules(mintRoot)
+
+        for _, module in ipairs(modules) do
+            local modulePath = fs.combine(mintRoot, module)
+            local moduleConfigDir = fs.combine(mintRoot, "mint/configs", module)
+
+            -- Create module config directory if needed
+            if not fs.exists(moduleConfigDir) then
+                fs.makeDir(moduleConfigDir)
+                print("Created config directory for " .. module)
+            end
+
+            -- Process module wants
+            local missing = findWants(modulePath, mintRoot)
+
+            for _, configName in ipairs(missing) do
+                copyDefault(configName, module, mintRoot)
+            end
+        end
+
+        print("Setup completed")
         return true
     elseif command == "help" then
         print("Mint Wrapper Usage:")
         print("  mint run <module> [arguments] - Run a module")
         print("  mint setup                    - Setup config directories")
-        print("  mint list                     - List available modules")
         print("  mint help                     - Show this help message")
-        print("")
-
-        local modules = discoverModules(mint_root)
-        if #modules > 0 then
-            print("Available modules: " .. table.concat(modules, ", "))
-        else
-            print("No modules found in " .. mint_root)
-        end
-        shell.setDir(old_dir)
         return true
     else
         print("Unknown command: " .. command)
         print("Use 'mint help' for usage information")
-        shell.setDir(old_dir)
         return false
     end
 end
 
--- If run directly from command line
+-- If this script is run directly
 if not package.loaded[(...)] then
     local args = { ... }
     local success = run(table.unpack(args))
@@ -469,12 +284,7 @@ end
 -- Return the API for programmatic usage
 return {
     run = run,
-    setup = function()
-        local mint_root = findMintRoot()
-        return mint_root and ensureConfigs(mint_root)
-    end,
-    list = function()
-        local mint_root = findMintRoot()
-        return mint_root and discoverModules(mint_root)
-    end
+    discoverModules = discoverModules,
+    findWants = findWants,
+    copyDefault = copyDefault
 }

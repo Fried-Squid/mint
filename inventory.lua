@@ -173,7 +173,8 @@ This inventory system works with the following sequence of function calls:
      - Find appropriate slot with inventory.find_slot_in_sack()
      - Move item with inventory.move_item() or drop with inventory.drop_item()
 
-   - inventory.check_trash_sack(inv) - If trash sack is full, empty it
+   - inventory.check_trash_sack(inv) - If trash sack is full, calls inventory.empty_trash_sack()
+     - This dumps ALL trash items at once, not just individual items
 
 5. When equipping items:
    - inventory.equip(inv, item_name) - Equips specified peripheral
@@ -189,7 +190,8 @@ Slots 9-0: Ore (filled from 9 down)
 When the turtle mines a block:
 1. The block appears in the lowest available slot (typically slot 0)
 2. We identify its type and move it to the appropriate sack's highest available slot
-3. If the item is trash, it goes to trash_sack and is dropped when that sack is full
+3. If the item is trash, it goes to trash_sack and when that sack becomes full,
+   we drop ALL trash items at once using inventory.empty_trash_sack()
 
 This approach keeps the inventory organized and optimized for mining operations.
 ]] --
@@ -198,47 +200,324 @@ This approach keeps the inventory organized and optimized for mining operations.
 -- Returns "process_single" if we have [item, empty]
 -- Returns "process_full" otherwise
 function inventory.quick_check(inv)
-    -- TODO: Check if slot 0 has an item and slot 1 is empty
-    -- If so, we just process that single item
-    -- Otherwise, we do a full inventory process
+    -- Check slots 0 and 1 (adjust for Lua's 1-based indexing)
+    local slot0_item = turtle.getItemDetail(1)
+    local slot1_item = turtle.getItemDetail(2)
+
+    -- If slot 0 has an item and slot 1 is empty, we have a single new item
+    if slot0_item and not slot1_item then
+        return "process_single"
+    end
+
+    -- Otherwise, we need full processing
     return "process_full"
 end
 
 -- Process a single new item in the given slot
 function inventory.process_single_item(inv, slot)
-    -- TODO: Process a single new item
-    -- 1. Identify item type (trash, fuel, peripheral, ore)
-    -- 2. Move to appropriate sack or drop if trash
+    -- Get details of the item
+    local item = turtle.getItemDetail(slot + 1)
+    if not item then
+        return -- No item to process
+    end
+
+    -- Add to raw contents for tracking
+    table.insert(inv.raw_contents, {
+        name = item.name,
+        qty = item.count,
+        slot = slot
+    })
+
+    -- Check item type and handle accordingly
+    if inventory.is_trash(inv, item.name) then
+        -- If trash sack is full, empty it first
+        if inv.trash_sack.used_slots >= 3 then
+            inventory.empty_trash_sack(inv)
+        end
+
+        -- Add to trash sack (conceptual, not a real slot)
+        table.insert(inv.trash_sack.contents, {
+            name = item.name,
+            qty = item.count,
+            slot = -1 -- Virtual slot
+        })
+        inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
+
+        -- Drop the item
+        inventory.drop_item(slot)
+    elseif inventory.is_peripheral(inv, item.name) then
+        -- Find a slot in peripherals sack
+        local target_slot = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
+        if target_slot then
+            -- Move to peripherals sack
+            if inventory.move_item(slot, target_slot) then
+                -- Update sack contents
+                table.insert(inv.peripherals_sack.contents, {
+                    name = item.name,
+                    qty = item.count,
+                    slot = target_slot
+                })
+                inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+            end
+        end
+    elseif inventory.is_fuel(inv, item.name) then
+        -- Find a slot in fuel sack
+        local target_slot = inventory.find_slot_in_sack(inv, inv.fuel_sack)
+        if target_slot then
+            -- Move to fuel sack
+            if inventory.move_item(slot, target_slot) then
+                -- Update sack contents
+                table.insert(inv.fuel_sack.contents, {
+                    name = item.name,
+                    qty = item.count,
+                    slot = target_slot
+                })
+                inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+            end
+        end
+    else
+        -- Treat as ore
+        local target_slot = inventory.find_slot_in_sack(inv, inv.ore_sack)
+        if target_slot then
+            -- Move to ore sack
+            if inventory.move_item(slot, target_slot) then
+                -- Update sack contents
+                table.insert(inv.ore_sack.contents, {
+                    name = item.name,
+                    qty = item.count,
+                    slot = target_slot
+                })
+                inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+            end
+        end
+    end
 end
 
 -- Process all sacks to ensure items are in the correct places
 function inventory.process_sacks(inv)
-    -- TODO: Process all sacks
-    -- 1. Start with peripherals sack (highest slots)
-    -- 2. Then fuel sack
-    -- 3. Then ore sack
-    -- 4. Move items to correct sacks if they're in the wrong one
+    -- Scan inventory to get current state
+    inventory.scan(inv)
+
+    -- Clear sack contents
+    inv.peripherals_sack.contents = {}
+    inv.peripherals_sack.used_slots = 0
+    inv.fuel_sack.contents = {}
+    inv.fuel_sack.used_slots = 0
+    inv.ore_sack.contents = {}
+    inv.ore_sack.used_slots = 0
+
+    -- Process each slot in the inventory
+    for _, item in ipairs(inv.raw_contents) do
+        local slot = item.slot
+        local name = item.name
+
+        -- Check which sack this slot belongs to physically
+        local in_peripheral_range = (slot >= inv.peripherals_sack.end_slot and slot <= inv.peripherals_sack.start_slot)
+        local in_fuel_range = (slot >= inv.fuel_sack.end_slot and slot <= inv.fuel_sack.start_slot)
+        local in_ore_range = (slot >= inv.ore_sack.end_slot and slot <= inv.ore_sack.start_slot)
+
+        -- Check which sack this item should be in logically
+        local is_peripheral = inventory.is_peripheral(inv, name)
+        local is_fuel = inventory.is_fuel(inv, name)
+        local is_trash = inventory.is_trash(inv, name)
+
+        -- Handle based on item type and current location
+        if is_trash then
+            -- Add to trash sack for later processing
+            table.insert(inv.trash_sack.contents, {
+                name = name,
+                qty = item.qty,
+                slot = slot
+            })
+            inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
+        elseif is_peripheral then
+            if in_peripheral_range then
+                -- Item is already in the right sack
+                table.insert(inv.peripherals_sack.contents, {
+                    name = name,
+                    qty = item.qty,
+                    slot = slot
+                })
+                inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+            else
+                -- Item needs to be moved to peripherals sack
+                local target_slot = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
+                if target_slot then
+                    if inventory.move_item(slot, target_slot) then
+                        table.insert(inv.peripherals_sack.contents, {
+                            name = name,
+                            qty = item.qty,
+                            slot = target_slot
+                        })
+                        inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+                    end
+                end
+            end
+        elseif is_fuel then
+            if in_fuel_range then
+                -- Item is already in the right sack
+                table.insert(inv.fuel_sack.contents, {
+                    name = name,
+                    qty = item.qty,
+                    slot = slot
+                })
+                inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+            else
+                -- Item needs to be moved to fuel sack
+                local target_slot = inventory.find_slot_in_sack(inv, inv.fuel_sack)
+                if target_slot then
+                    if inventory.move_item(slot, target_slot) then
+                        table.insert(inv.fuel_sack.contents, {
+                            name = name,
+                            qty = item.qty,
+                            slot = target_slot
+                        })
+                        inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+                    end
+                end
+            end
+        else
+            -- Treat as ore
+            if in_ore_range then
+                -- Item is already in the right sack
+                table.insert(inv.ore_sack.contents, {
+                    name = name,
+                    qty = item.qty,
+                    slot = slot
+                })
+                inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+            else
+                -- Item needs to be moved to ore sack
+                local target_slot = inventory.find_slot_in_sack(inv, inv.ore_sack)
+                if target_slot then
+                    if inventory.move_item(slot, target_slot) then
+                        table.insert(inv.ore_sack.contents, {
+                            name = name,
+                            qty = item.qty,
+                            slot = target_slot
+                        })
+                        inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- Process unassigned items in raw_contents
 function inventory.process_unassigned(inv)
-    -- TODO: Process unassigned items
-    -- 1. For each item in raw_contents
-    -- 2. Categorize as trash, fuel, peripheral, or ore
-    -- 3. Move to appropriate sack or drop if trash
+    -- Track slots that are now part of a sack
+    local assigned_slots = {}
+
+    -- Mark all slots in sacks as assigned
+    for _, item in ipairs(inv.peripherals_sack.contents) do
+        assigned_slots[item.slot] = true
+    end
+
+    for _, item in ipairs(inv.fuel_sack.contents) do
+        assigned_slots[item.slot] = true
+    end
+
+    for _, item in ipairs(inv.ore_sack.contents) do
+        assigned_slots[item.slot] = true
+    end
+
+    -- Process items not yet in a sack
+    for _, item in ipairs(inv.raw_contents) do
+        if not assigned_slots[item.slot] then
+            -- Item is unassigned, categorize and handle
+            if inventory.is_trash(inv, item.name) then
+                -- Add to trash sack for later processing
+                table.insert(inv.trash_sack.contents, {
+                    name = item.name,
+                    qty = item.qty,
+                    slot = item.slot
+                })
+                inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
+
+                -- Mark as assigned
+                assigned_slots[item.slot] = true
+            elseif inventory.is_peripheral(inv, item.name) then
+                local target_slot = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
+                if target_slot then
+                    if inventory.move_item(item.slot, target_slot) then
+                        table.insert(inv.peripherals_sack.contents, {
+                            name = item.name,
+                            qty = item.qty,
+                            slot = target_slot
+                        })
+                        inv.peripherals_sack.used_slots = inv.peripherals_sack.used_slots + 1
+
+                        -- Mark as assigned
+                        assigned_slots[item.slot] = true
+                    end
+                end
+            elseif inventory.is_fuel(inv, item.name) then
+                local target_slot = inventory.find_slot_in_sack(inv, inv.fuel_sack)
+                if target_slot then
+                    if inventory.move_item(item.slot, target_slot) then
+                        table.insert(inv.fuel_sack.contents, {
+                            name = item.name,
+                            qty = item.qty,
+                            slot = target_slot
+                        })
+                        inv.fuel_sack.used_slots = inv.fuel_sack.used_slots + 1
+
+                        -- Mark as assigned
+                        assigned_slots[item.slot] = true
+                    end
+                end
+            else
+                -- Treat as ore
+                local target_slot = inventory.find_slot_in_sack(inv, inv.ore_sack)
+                if target_slot then
+                    if inventory.move_item(item.slot, target_slot) then
+                        table.insert(inv.ore_sack.contents, {
+                            name = item.name,
+                            qty = item.qty,
+                            slot = target_slot
+                        })
+                        inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
+
+                        -- Mark as assigned
+                        assigned_slots[item.slot] = true
+                    end
+                end
+            end
+        end
+    end
 end
 
 -- Check if trash sack is full and empty it if needed
 function inventory.check_trash_sack(inv)
-    -- TODO: Check if trash sack is full
-    -- If full, drop ALL items in trash sack at once (not just one)
-    -- This empties the entire trash sack in one go
+    -- Check if trash sack is at or near capacity
+    if inv.trash_sack.used_slots >= 3 then
+        -- Empty the entire trash sack
+        inventory.empty_trash_sack(inv)
+    end
 end
 
 -- Empty the entire trash sack (drop all items)
 function inventory.empty_trash_sack(inv)
-    -- TODO: Drop every item in the trash sack
-    -- 1. IterateLoad item classification lists and slot configuration from .env
+    -- Drop every item in the trash sack
+    for _, item in ipairs(inv.trash_sack.contents) do
+        -- If the item has a real slot (not virtual)
+        if item.slot >= 0 then
+            -- Drop the item
+            inventory.drop_item(item.slot)
+        end
+    end
+
+    -- Clear the trash sack contents
+    inv.trash_sack.contents = {}
+
+    -- Reset used slots counter
+    inv.trash_sack.used_slots = 0
+
+    print("Trash sack emptied")
+end
+
+-- Load item classification lists and slot configuration from .env
 function inventory.load_from_config(inv, config)
     -- Load item classification lists
     inv.trash_types = config.dotenv.trash_types or {}
@@ -276,15 +555,33 @@ end
 
 -- Scan the turtle's inventory and update raw_contents
 function inventory.scan(inv)
-    -- TODO: Scan turtle inventory
-    -- 1. Use turtle.getItemDetail for each slot
-    -- 2. Update inv.raw_contents with current inventory
+    -- Clear current raw_contents
+    inv.raw_contents = {}
+
+    -- Scan all 16 slots (0-15) of the turtle's inventory
+    for slot = 0, 15 do
+        local item = turtle.getItemDetail(slot + 1) -- +1 because Lua is 1-indexed but CC slots are 0-indexed
+        if item then
+            -- Add to raw_contents with slot information
+            table.insert(inv.raw_contents, {
+                name = item.name,
+                qty = item.count,
+                slot = slot
+            })
+        end
+    end
+
+    return inv.raw_contents
 end
 
 -- Check if an item is of a specific type
 function inventory.is_item_type(inv, item_name, type_list)
-    -- TODO: Check if item_name is in type_list
-    -- Returns true if item is of the specified type
+    -- Check if item_name is in the type_list
+    for _, type_name in ipairs(type_list) do
+        if item_name == type_name then
+            return true
+        end
+    end
     return false
 end
 
@@ -305,27 +602,79 @@ end
 
 -- Find an available slot in a specific sack
 function inventory.find_slot_in_sack(inv, sack)
-    -- TODO: Find an available slot in the given sack
-    -- Search from start_slot to end_slot
-    -- Return nil if no slot is available
+    -- If sack is already full, return nil
+    if sack.used_slots >= sack.slots_max then
+        return nil
+    end
+
+    -- Track which slots are already used in this sack
+    local used_slots = {}
+    for _, item in ipairs(sack.contents) do
+        used_slots[item.slot] = true
+    end
+
+    -- Search from start_slot (highest) down to end_slot (lowest)
+    for slot = sack.start_slot, sack.end_slot, -1 do
+        -- Check if this slot is available
+        if not used_slots[slot] then
+            -- Check if the physical slot is empty
+            local detail = turtle.getItemDetail(slot + 1)
+            if not detail then
+                return slot
+            end
+        end
+    end
+
+    -- No available slots found
     return nil
 end
 
 -- Move an item from one slot to another
 function inventory.move_item(from_slot, to_slot)
-    -- TODO: Use turtle.select and turtle.transferTo
-    -- to move an item from one slot to another
+    -- Select the source slot (+1 for Lua indexing)
+    turtle.select(from_slot + 1)
+
+    -- Move the entire stack to the destination slot (+1 for Lua indexing)
+    return turtle.transferTo(to_slot + 1)
 end
 
 -- Drop an item from a specific slot
 function inventory.drop_item(slot)
-    -- TODO: Drop the item in the specified slot
+    -- Select the slot to drop from (+1 for Lua indexing)
+    turtle.select(slot + 1)
+
+    -- Drop the entire stack
+    return turtle.drop()
 end
 
 -- Equip an item from the peripherals sack
 function inventory.equip(inv, item_name)
-    -- TODO: Find the item in peripherals_sack and equip it
-    -- Update inv.equipped
+    -- Find the item in peripherals_sack
+    for _, item in ipairs(inv.peripherals_sack.contents) do
+        if item.name == item_name then
+            -- Select the item
+            turtle.select(item.slot + 1)
+
+            -- Try to equip on right side first
+            local success = turtle.equipRight()
+
+            -- If that fails, try left side
+            if not success then
+                success = turtle.equipLeft()
+            end
+
+            -- Update equipped status if successful
+            if success then
+                inv.equipped = item_name
+                return true
+            end
+
+            return false
+        end
+    end
+
+    -- Item not found in peripherals sack
+    return false
 end
 
 -- Return the module

@@ -1,4 +1,13 @@
 -- Simple test script that runs the inventory test
 print("Starting inventory test...")
-shell.run("mint/test_inventory")
+
+-- Ensure we run from the mint directory
+if fs.exists("inventory.lua") then
+    shell.run("test_inventory")
+else
+    print("Changing to mint directory...")
+    shell.run("cd mint")
+    shell.run("test_inventory")
+end
+
 print("Test completed.")

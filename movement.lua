@@ -1,14 +1,13 @@
 -- Movement module for the mining turtle
 local movement = {}
 
--- Load the helper module for consistent module loading
-local loader = dofile("mint/loader.lua")
-
--- Load config module with proper error handling
-local config = loader.require("mint.config")
+-- Load config module
+local config = require("config")
 
 -- Ensure turtle API is available
-loader.ensure_turtle()
+if not turtle and _G.turtle then
+    turtle = _G.turtle
+end
 
 -- Set the turtle's facing direction
 function movement.setlook(wishdir)

@@ -1,15 +1,14 @@
 -- Main mining program
 
--- Load the helper module for consistent module loading
-local loader = dofile("mint/loader.lua")
-
--- Load modules with proper error handling
-local config = loader.require("mint.config")
-local movement = loader.require("mint.movement")
-local inventory = loader.require("mint.inventory")
+-- Load modules directly
+local config = require("config")
+local movement = require("movement")
+local inventory = require("inventory")
 
 -- Ensure turtle API is available
-loader.ensure_turtle()
+if not turtle and _G.turtle then
+    turtle = _G.turtle
+end
 
 print("Miner initialization...")
 print("Miner ID: " .. config.dotenv.minerid)

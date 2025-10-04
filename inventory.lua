@@ -1,10 +1,9 @@
 -- Inventory module for the mining turtle
 
--- Load the helper module for consistent module loading
-local loader = dofile("mint/loader.lua")
-
 -- Ensure we have access to the turtle API
-loader.ensure_turtle()
+if not turtle and _G.turtle then
+    turtle = _G.turtle
+end
 -- Okay so to explain
 -- CC treats the inventory as a slot-based model but we effectively want buckets (sacks makes more contextual sense)
 -- When items come in they come in on the minimum free slot ONLY if they cant fill an existing sack.

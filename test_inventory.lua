@@ -1,12 +1,9 @@
 -- Test script for the inventory management system
 
--- Load the helper module for consistent module loading
-local loader = dofile("mint/loader.lua")
-
--- Load modules with proper error handling
-local config = loader.require("mint.config")
-local inventory = loader.require("mint.inventory")
-local logger = loader.require("mint.logger")
+-- Load modules directly
+local config = require("config")
+local inventory = require("inventory")
+local logger = require("logger")
 
 -- Set log level to debug for detailed output
 logger.set_level(logger.LEVELS.DEBUG)

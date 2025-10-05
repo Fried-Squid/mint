@@ -154,4 +154,19 @@ print("New fuel level: " .. turtle.getFuelLevel())
 print("Fuel percentage: " .. inventory.get_fuel_percentage(inv) .. "%")
 print()
 
+-- Test unloading to inventory
+print("=== Testing Unloading to Inventory ===")
+print("Attempting to unload a single slot to inventory in front...")
+local unload_success = inventory.unload_to_inventory(inv, 1, "front")
+print("Unload single slot success: " .. tostring(unload_success))
+
+print("Attempting to unload entire ore sack to inventory below...")
+local unloaded_count = inventory.unload_sack_to_inventory(inv, "ore", "down")
+print("Unloaded " .. unloaded_count .. " slots from ore sack")
+
+-- Show final inventory state after unloading
+print("Inventory after unloading:")
+print_inventory()
+print()
+
 print("=== Inventory Test Complete ===")

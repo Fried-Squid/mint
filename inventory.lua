@@ -80,8 +80,9 @@ function inventory.create(config)
     local fuel_slots = config.dotenv.fuel_slots
     local peripheral_slots = config.dotenv.peripheral_slots
 
-    -- Validate total slots don't exceed turtle capacity
-    local total_slots = ore_slots + fuel_slots + peripheral_slots
+    -- Reserve 2 slots for trash, account for that in validation
+    local trash_slots = 2
+    local total_slots = ore_slots + fuel_slots + peripheral_slots + trash_slots
     assert(total_slots <= 16, "Total sack slots exceed turtle inventory capacity")
 
     -- Calculate slot ranges for each sack (in reverse)
@@ -91,7 +92,7 @@ function inventory.create(config)
 
     -- Add trash sack (2 slots) before peripherals
     local trash_start = peripheral_end - 1
-    local trash_end = trash_start - 2 + 1
+    local trash_end = trash_start - trash_slots + 1
 
     local fuel_start = trash_end - 1
     local fuel_end = fuel_start - fuel_slots + 1
@@ -546,8 +547,9 @@ function inventory.process_unassigned(inv)
 
                 -- Mark as assigned
                 assigned_slots[item.slot] = true
-                assigned_slots[target_slot] = true
-                assigned_slots[target_slot] = true
+                if target_slot then
+                    assigned_slots[target_slot] = true
+                end
             elseif inventory.is_peripheral(inv, item.name) then
                 local target_slot = inventory.find_slot_in_sack(inv, inv.peripherals_sack)
                 if target_slot then
@@ -561,7 +563,9 @@ function inventory.process_unassigned(inv)
 
                         -- Mark as assigned
                         assigned_slots[item.slot] = true
-                        assigned_slots[target_slot] = true
+                        if target_slot then
+                            assigned_slots[target_slot] = true
+                        end
                     end
                 end
             elseif inventory.is_fuel(inv, item.name) then
@@ -685,8 +689,9 @@ function inventory.load_from_config(inv, config)
     local peripheral_end = peripheral_start - peripheral_slots + 1
 
     -- Add trash sack (2 slots) before peripherals
+    local trash_slots = 2
     local trash_start = peripheral_end - 1
-    local trash_end = trash_start - 2 + 1
+    local trash_end = trash_start - trash_slots + 1
 
     local fuel_start = trash_end - 1
     local fuel_end = fuel_start - fuel_slots + 1
@@ -778,9 +783,12 @@ function inventory.find_slot_in_sack(inv, sack)
 
     -- Check which slots are physically occupied
     for slot = sack.start_slot, sack.end_slot, -1 do
-        local detail = turtle.getItemDetail(slot + 1)
-        if detail then
-            occupied_slots[slot] = true
+        -- Make sure slot is valid (0-15)
+        if slot >= 0 and slot <= 15 then
+            local detail = turtle.getItemDetail(slot + 1)
+            if detail then
+                occupied_slots[slot] = true
+            end
         end
     end
 
@@ -844,6 +852,86 @@ function inventory.equip(inv, item_name)
     return false
 end
 
+-- Unload a stack to an adjacent inventory on the specified side
+-- side can be "front", "back", "left", "right", "up", or "down"
+-- Returns true if successful, false otherwise
+function inventory.unload_to_inventory(inv, slot, side, count)
+    -- Validate parameters
+    if not slot or slot < 0 or slot > 15 then
+        print("Invalid slot: " .. tostring(slot))
+        return false, "Invalid slot"
+    end
+
+    -- Validate side
+    if not side then
+        side = "front" -- Default to front
+    end
+
+    -- Map side to corresponding turtle function
+    local drop_funcs = {
+        front = turtle.drop,
+        up = turtle.dropUp,
+        down = turtle.dropDown,
+    }
+
+    -- Handle left/right/back by turning first
+    local original_dir = nil
+    if side == "left" then
+        original_dir = inv.equipped and inv.equipped.lookdir
+        turtle.turnLeft()
+        drop_funcs[side] = turtle.drop
+    elseif side == "right" then
+        original_dir = inv.equipped and inv.equipped.lookdir
+        turtle.turnRight()
+        drop_funcs[side] = turtle.drop
+    elseif side == "back" then
+        original_dir = inv.equipped and inv.equipped.lookdir
+        turtle.turnRight()
+        turtle.turnRight()
+        drop_funcs[side] = turtle.drop
+    end
+
+    local drop_func = drop_funcs[side]
+    if not drop_func then
+        return false, "Invalid side: " .. side
+    end
+
+    -- Select the slot
+    turtle.select(slot + 1)
+
+    -- Get item details before dropping
+    local item = turtle.getItemDetail(slot + 1)
+    if not item then
+        -- No item in this slot
+        return false, "No item in slot " .. (slot + 1)
+    end
+
+    -- Try to drop the item
+    local success
+    if count then
+        -- Drop specified count
+        success = drop_func(count)
+    else
+        -- Drop entire stack
+        success = drop_func()
+    end
+
+    -- Restore original direction if needed
+    if original_dir then
+        -- Turn back to original direction
+        if side == "left" then
+            turtle.turnRight()
+        elseif side == "right" then
+            turtle.turnLeft()
+        elseif side == "back" then
+            turtle.turnRight()
+            turtle.turnRight()
+        end
+    end
+
+    return success
+end
+
 -- Get fuel level as a percentage of maximum
 function inventory.get_fuel_percentage(inv)
     local fuel_level = turtle.getFuelLevel()
@@ -856,6 +944,60 @@ function inventory.get_fuel_percentage(inv)
 
     -- Calculate percentage
     return math.floor((fuel_level / fuel_limit) * 100)
+end
+
+-- Unload an entire sack to an adjacent inventory
+-- side can be "front", "back", "left", "right", "up", or "down"
+-- Returns number of slots successfully unloaded
+function inventory.unload_sack_to_inventory(inv, sack_name, side)
+    -- Validate parameters
+    if not sack_name then
+        return 0, "No sack specified"
+    end
+
+    -- Get the specified sack
+    local sack
+    if sack_name == "ore" then
+        sack = inv.ore_sack
+    elseif sack_name == "fuel" then
+        sack = inv.fuel_sack
+    elseif sack_name == "peripheral" or sack_name == "peripherals" then
+        sack = inv.peripherals_sack
+    elseif sack_name == "trash" then
+        sack = inv.trash_sack
+    else
+        return 0, "Invalid sack name: " .. sack_name
+    end
+
+    if not sack or not sack.contents then
+        return 0, "Sack not found or empty"
+    end
+
+    -- Keep track of how many slots we unloaded
+    local unloaded_count = 0
+
+    -- Remember original selected slot
+    local original_slot = turtle.getSelectedSlot()
+
+    -- Unload each item in the sack
+    for _, item in ipairs(sack.contents) do
+        local success = inventory.unload_to_inventory(inv, item.slot, side)
+        if success then
+            unloaded_count = unloaded_count + 1
+        end
+    end
+
+    -- Restore original selected slot
+    turtle.select(original_slot)
+
+    -- If we unloaded items, we need to update our inventory
+    if unloaded_count > 0 then
+        inventory.scan(inv)
+        sack.contents = {}
+        sack.used_slots = 0
+    end
+
+    return unloaded_count
 end
 
 -- Return the module

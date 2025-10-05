@@ -17,6 +17,15 @@ print("Miner ID: " .. config.dotenv.minerid)
 local zdir = 0 -- Default to negative Z direction
 config.init_minerstate(zdir)
 
+-- Create inventory and load config
+local inv = inventory.create(config)
+inventory.load_from_config(inv, config)
+
+print("Inventory configured:")
+print("  Ore sack: " .. config.dotenv.ore_slots .. " slots")
+print("  Fuel sack: " .. config.dotenv.fuel_slots .. " slots")
+print("  Peripheral sack: " .. config.dotenv.peripheral_slots .. " slots")
+
 -- Mining step function
 local function step()
     -- We assume we start FACING the top left block on even (incl 0 steps) and the BOTTOM left on odd.
@@ -57,6 +66,9 @@ local function step()
 
     config.save_config(".minerstate", config.minerstate)
     print("Completed mining step " .. config.minerstate.step)
+
+    -- Update inventory after each step
+    inventory.update(inv)
 end
 
 -- Check fuel level
@@ -71,30 +83,63 @@ local function check_fuel()
     -- If fuel is below threshold and not infinite
     if fuel_level < config.dotenv.fuel_threshold and fuel_level ~= "unlimited" then
         print("Fuel below threshold (" .. config.dotenv.fuel_threshold .. ")")
-        -- Add refueling logic here if needed
+        -- Use inventory's refueling function
+        print("Attempting to refuel...")
+        local refueled = inventory.refuel(inv)
+        if refueled then
+            print("Successfully refueled. New level: " .. turtle.getFuelLevel())
+        else
+            print("Failed to refuel automatically")
+        end
     end
+end
+
+-- Check if ore sack is full
+local function check_ore_sack_full()
+    -- Update inventory tracking
+    inventory.update(inv)
+
+    -- Check if ore sack is at capacity
+    if inv.ore_sack.used_slots >= inv.ore_sack.slots_max then
+        print("WARNING: Ore sack is full! Mining will stop.")
+        return true
+    end
+    return false
 end
 
 -- Main execution
 local function main()
     print("Miner program starting...")
 
-    -- Create inventory with slot configuration from config
-    local inv = inventory.create(config)
-    inventory.load_from_config(inv, config)
-
-    -- Check fuel before starting
+    -- Check fuel and inventory before starting
     check_fuel()
+    inventory.update(inv)
 
-    -- Execute two mining steps
+    -- Execute mining steps
     print("Beginning mining operations...")
+
+    -- First step
     step()
     print("First step complete")
 
+    -- Check fuel and inventory between steps
+    check_fuel()
+    if check_ore_sack_full() then
+        print("Mining stopped: Ore sack is full. Please empty inventory and restart.")
+        return
+    end
+
+    -- Second step
     step()
     print("Second step complete")
 
-    print("Mining operation completed successfully")
+    -- Final inventory update and check
+    inventory.update(inv)
+    if check_ore_sack_full() then
+        print("Mining completed but ore sack is full. Please empty inventory.")
+    else
+        print("Mining operation completed successfully")
+    end
 end
 
 -- Run the main function

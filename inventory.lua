@@ -153,7 +153,9 @@ function inventory.update(inv)
     inventory.check_trash_sack(inv)
 
     -- 5. Check if fuel is needed and refuel if necessary
-    inventory.check_fuel(inv)
+    -- Use the config fuel threshold if available
+    local threshold = (config and config.dotenv and config.dotenv.fuel_threshold) or 1000
+    inventory.check_fuel(inv, threshold)
 end
 
 --[[
@@ -631,7 +633,7 @@ function inventory.empty_trash_sack(inv)
 end
 
 -- Check fuel level and refuel if needed
-function inventory.check_fuel(inv)
+function inventory.check_fuel(inv, threshold)
     -- Get current fuel level
     local fuel_level = turtle.getFuelLevel()
 
@@ -640,10 +642,15 @@ function inventory.check_fuel(inv)
         return
     end
 
+    -- Use provided threshold or config threshold or default 1000
+    local fuel_threshold = threshold or (config and config.dotenv.fuel_threshold) or 1000
+
     -- Check if we need to refuel (below threshold)
-    if fuel_level < 1000 then
-        inventory.refuel(inv)
+    if fuel_level < fuel_threshold then
+        return inventory.refuel(inv)
     end
+
+    return false
 end
 
 -- Refuel the turtle from items in the fuel sack

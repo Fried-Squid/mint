@@ -115,31 +115,63 @@ local function main()
     check_fuel()
     inventory.update(inv)
 
-    -- Execute mining steps
-    print("Beginning mining operations...")
+    -- Execute mining continuously until ore sack is full or out of fuel
+    print("Beginning continuous mining operations...")
+    print("Will mine until ore sack is full or fuel runs out.")
 
-    -- First step
-    step()
-    print("First step complete")
+    local steps_completed = 0
+    local continue_mining = true
 
-    -- Check fuel and inventory between steps
-    check_fuel()
-    if check_ore_sack_full() then
-        print("Mining stopped: Ore sack is full. Please empty inventory and restart.")
-        return
+    while continue_mining do
+        -- Check fuel before step
+        local fuel_level = turtle.getFuelLevel()
+        if fuel_level == "unlimited" then
+            print("Fuel: Unlimited")
+        else
+            print("Fuel: " .. fuel_level)
+            if fuel_level < 1000 then
+                print("WARNING: Fuel level critical, attempting to refuel...")
+                if not inventory.refuel(inv) then
+                    print("STOPPING: Not enough fuel to continue")
+                    continue_mining = false
+                    break
+                end
+            elseif fuel_level < config.dotenv.fuel_threshold then
+                print("Fuel below threshold, refueling...")
+                inventory.refuel(inv)
+            end
+        end
+
+        -- Stop if not enough fuel for a full step (estimated 100 fuel)
+        if fuel_level ~= "unlimited" and fuel_level < 100 then
+            print("STOPPING: Not enough fuel to safely complete next step")
+            continue_mining = false
+            break
+        end
+
+        -- Execute one mining step
+        print("Starting mining step #" .. (steps_completed + 1))
+        step()
+        steps_completed = steps_completed + 1
+        print("Completed mining step #" .. steps_completed)
+
+        -- Check inventory after step
+        inventory.update(inv)
+
+        if check_ore_sack_full() then
+            print("STOPPING: Ore sack is full. Please empty inventory and restart.")
+            continue_mining = false
+            break
+        end
+
+        -- Brief pause between steps (optional)
+        os.sleep(1)
     end
 
-    -- Second step
-    step()
-    print("Second step complete")
-
-    -- Final inventory update and check
-    inventory.update(inv)
-    if check_ore_sack_full() then
-        print("Mining completed but ore sack is full. Please empty inventory.")
-    else
-        print("Mining operation completed successfully")
-    end
+    print("Mining operation ended after " .. steps_completed .. " steps")
+    print("Fuel remaining: " .. (turtle.getFuelLevel() == "unlimited" and "Unlimited" or turtle.getFuelLevel()))
+    print("Ore sack: " .. inv.ore_sack.used_slots .. "/" .. inv.ore_sack.slots_max .. " slots used")
+    print("To restart mining, run the program again")
 end
 
 -- Run the main function

@@ -1,0 +1,79 @@
+-- Long mining test script
+print("=== Long Mining Test ===")
+print("This test will run continuous mining until:")
+print("  1. The ore sack is full, or")
+print("  2. The turtle runs out of fuel")
+print("")
+
+-- Load the config
+local config = require("config")
+
+-- Create a backup of the original minerstate
+print("Creating backup of current minerstate...")
+local fs_exists = fs.exists("mint/.minerstate_backup")
+if fs_exists then
+  fs.delete("mint/.minerstate_backup")
+end
+
+if fs.exists("mint/.minerstate") then
+  fs.copy("mint/.minerstate", "mint/.minerstate_backup")
+  print("Minerstate backup created.")
+else
+  print("No existing minerstate found, will create new.")
+end
+
+-- Reset step counter to 0 for fresh start
+print("Resetting step counter...")
+local minerstate = dofile("mint/.minerstate")
+minerstate.step = 0
+minerstate.substep = 0
+
+-- Save the modified minerstate
+local file = fs.open("mint/.minerstate", "w")
+file.write("return {\n")
+for key, value in pairs(minerstate) do
+  if type(value) == "string" then
+    file.write(string.format('  %s = "%s",\n', key, value))
+  else
+    file.write(string.format('  %s = %s,\n', key, tostring(value)))
+  end
+end
+file.write("}\n")
+file.close()
+print("Minerstate reset, ready for long mining test")
+
+-- Print initial fuel status
+local fuel_level = turtle.getFuelLevel()
+print("Initial fuel level: " .. (fuel_level == "unlimited" and "Unlimited" or fuel_level))
+
+-- Print mining parameters from config
+print("Mining parameters:")
+print("- Fuel threshold: " .. config.dotenv.fuel_threshold)
+print("- Ore slots: " .. config.dotenv.ore_slots)
+print("- Fuel slots: " .. config.dotenv.fuel_slots)
+print("- Peripheral slots: " .. config.dotenv.peripheral_slots)
+print("")
+
+print("Starting continuous mining operation...")
+print("Press Ctrl+T to terminate if needed")
+print("")
+
+-- Run the miner program
+shell.run("miner")
+
+print("")
+print("=== Long Mining Test Complete ===")
+
+-- Ask if user wants to restore the original minerstate
+print("Do you want to restore the original minerstate? (y/n)")
+local input = read()
+if input:lower() == "y" or input:lower() == "yes" then
+  if fs.exists("mint/.minerstate_backup") then
+    fs.copy("mint/.minerstate_backup", "mint/.minerstate")
+    print("Original minerstate restored.")
+  else
+    print("No backup found to restore.")
+  end
+end
+
+print("Test finished.")

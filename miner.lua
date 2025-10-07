@@ -100,11 +100,48 @@ local function check_ore_sack_full()
     inventory.update(inv)
 
     -- Check if ore sack is at capacity
-    if inv.ore_sack.used_slots >= inv.ore_sack.slots_max then
+    if inventory.is_ore_sack_full(inv) then
         print("WARNING: Ore sack is full! Mining will stop.")
         return true
     end
     return false
+end
+
+-- Function to handle home visit and restocking
+local function visit_home()
+    -- Save current position and teleport home
+    print("Need to visit home for refuel/unload...")
+    if not inventory.handle_teleport(inv, true) then
+        print("Failed to teleport home")
+        return false
+    end
+
+    -- At home - unload resources
+    print("Unloading ore to storage below...")
+    inventory.unload_sack_to_inventory(inv, "ore", "down")
+
+    -- Try to refuel from chest above
+    print("Attempting to refuel from chest above...")
+    turtle.select(1)
+    turtle.suckUp() -- Try to get fuel from above
+
+    -- Attempt to refuel until we have enough
+    local attempts = 0
+    while turtle.getFuelLevel() < 5000 and attempts < 10 do
+        inventory.refuel(inv)
+        turtle.suckUp() -- Get more fuel if needed
+        attempts = attempts + 1
+        print("Fuel level: " .. turtle.getFuelLevel())
+    end
+
+    -- Return to mining location
+    print("Returning to mining location...")
+    if not inventory.return_from_home(inv) then
+        print("Failed to return to mining location")
+        return false
+    end
+
+    return true
 end
 
 -- Main execution
@@ -129,20 +166,20 @@ local function main()
             print("Fuel: Unlimited")
         else
             print("Fuel: " .. fuel_level)
-            if fuel_level < 1000 then
-                print("WARNING: Fuel level critical, attempting to refuel...")
-                if not inventory.refuel(inv) then
-                    print("STOPPING: Not enough fuel to continue")
+            -- Check if fuel is low enough to warrant a home visit
+            if fuel_level < 5000 then
+                print("Fuel below return threshold, need to refuel")
+                if not visit_home() then
+                    print("STOPPING: Failed to refuel at home")
                     continue_mining = false
                     break
                 end
-            elseif fuel_level < config.dotenv.fuel_threshold then
-                print("Fuel below threshold, refueling...")
-                inventory.refuel(inv)
+                -- Update fuel level after home visit
+                fuel_level = turtle.getFuelLevel()
             end
         end
 
-        -- Stop if not enough fuel for a full step (estimated 100 fuel)
+        -- Stop if still not enough fuel for a full step (estimated 100 fuel)
         if fuel_level ~= "unlimited" and fuel_level < 100 then
             print("STOPPING: Not enough fuel to safely complete next step")
             continue_mining = false
@@ -158,10 +195,14 @@ local function main()
         -- Check inventory after step
         inventory.update(inv)
 
-        if check_ore_sack_full() then
-            print("STOPPING: Ore sack is full. Please empty inventory and restart.")
-            continue_mining = false
-            break
+        -- Check if ore sack is full
+        if inventory.is_ore_sack_full(inv) then
+            print("Ore sack full, need to unload")
+            if not visit_home() then
+                print("STOPPING: Failed to unload at home")
+                continue_mining = false
+                break
+            end
         end
 
         -- Brief pause between steps (optional)

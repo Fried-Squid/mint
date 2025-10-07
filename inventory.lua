@@ -350,13 +350,13 @@ function inventory.process_sacks(inv)
         -- Handle based on item type and current location
         if is_trash then
             if in_trash_range then
-                -- Item is already in the trash sack
-                table.insert(inv.trash_sack.contents, {
+                -- Item is already in the right sack
+                table.insert(inv.ore_sack.contents, {
                     name = name,
                     qty = item.qty,
                     slot = slot
                 })
-                inv.trash_sack.used_slots = inv.trash_sack.used_slots + 1
+                inv.ore_sack.used_slots = inv.ore_sack.used_slots + 1
                 processed_slots[slot] = true
             else
                 -- Item needs to be moved to trash sack or dropped
@@ -840,11 +840,6 @@ function inventory.equip(inv, item_name)
             -- Try to equip on right side first
             local success = turtle.equipRight()
 
-            -- If that fails, try left side
-            if not success then
-                success = turtle.equipLeft()
-            end
-
             -- Update equipped status if successful
             if success then
                 inv.equipped = item_name
@@ -857,6 +852,140 @@ function inventory.equip(inv, item_name)
 
     -- Item not found in peripherals sack
     return false
+end
+
+-- Equip the diamond pickaxe
+function inventory.equip_pickaxe(inv)
+    -- Look for pickaxe in peripherals sack
+    for _, item in ipairs(inv.peripherals_sack.contents) do
+        if string.find(item.name, "pickaxe") then
+            -- Select the item
+            turtle.select(item.slot + 1)
+
+            -- Equip on right side only
+            local success = turtle.equipRight()
+
+            -- Update equipped status if successful
+            if success then
+                print("Equipped diamond pickaxe")
+                inv.equipped = "pickaxe"
+                return true
+            end
+
+            return false
+        end
+    end
+
+    print("No pickaxe found in peripherals sack")
+    return false
+end
+
+-- Equip the end automata core
+function inventory.equip_automata_core(inv)
+    -- Look for end automata core in peripherals sack
+    for _, item in ipairs(inv.peripherals_sack.contents) do
+        if string.find(item.name, "end_automata_core") then
+            -- Select the item
+            turtle.select(item.slot + 1)
+
+            -- Equip on right side only
+            local success = turtle.equipRight()
+
+            -- Update equipped status if successful
+            if success then
+                print("Equipped end automata core")
+                inv.equipped = "core"
+
+                -- Try to get the peripheral
+                local attempts = 0
+                while not peripheral.find("endAutomata") and attempts < 5 do
+                    os.sleep(0.5)
+                    attempts = attempts + 1
+                end
+
+                return true
+            end
+
+            return false
+        end
+    end
+
+    print("No end automata core found in peripherals sack")
+    return false
+end
+
+-- Check if the ore sack is full
+function inventory.is_ore_sack_full(inv)
+    return inv.ore_sack.used_slots >= inv.ore_sack.slots_max
+end
+
+-- Handle teleportation when needed (ore sack full or low fuel)
+function inventory.handle_teleport(inv, force)
+    -- Update inventory first
+    inventory.update(inv)
+
+    -- Check conditions for teleporting
+    local fuel_level = turtle.getFuelLevel()
+    local ore_full = inventory.is_ore_sack_full(inv)
+
+    if force or ore_full or (fuel_level ~= "unlimited" and fuel_level < 5000) then
+        -- Equip the automata core
+        if not inventory.equip_automata_core(inv) then
+            print("Failed to equip automata core, cannot teleport")
+            return false
+        end
+
+        -- Get the end automata peripheral
+        local core = peripheral.find("endAutomata")
+        if not core then
+            print("Failed to find endAutomata peripheral")
+            inventory.equip_pickaxe(inv)
+            return false
+        end
+
+        -- Save current position as "latest"
+        print("Saving current position as 'latest'")
+        core.savePoint("latest")
+
+        -- Teleport to home if it exists
+        print("Attempting to teleport home")
+        if not core.warpToPoint("home") then
+            print("Failed to teleport to home, home not set")
+            inventory.equip_pickaxe(inv)
+            return false
+        end
+
+        print("Successfully teleported to home")
+        return true
+    end
+
+    return false
+end
+
+-- Return to the latest position after restocking
+function inventory.return_from_home(inv)
+    -- Equip the automata core
+    if not inventory.equip_automata_core(inv) then
+        print("Failed to equip automata core, cannot teleport back")
+        return false
+    end
+
+    -- Get the end automata peripheral
+    local core = peripheral.find("endAutomata")
+    if not core then
+        print("Failed to find endAutomata peripheral")
+        inventory.equip_pickaxe(inv)
+        return false
+    end
+
+    -- Teleport to latest position
+    print("Teleporting back to mining location")
+    local success = core.warpToPoint("latest")
+
+    -- Re-equip the pickaxe
+    inventory.equip_pickaxe(inv)
+
+    return success
 end
 
 -- Unload a stack to an adjacent inventory on the specified side

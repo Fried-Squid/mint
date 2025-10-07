@@ -30,7 +30,7 @@ local function init()
             peripheral_slots = 3,
             trash_types = { "minecraft:cobblestone", "minecraft:dirt", "minecraft:gravel" },
             fuel_types = { "minecraft:lava_bucket", "minecraft:bucket" },
-            peripheral_types = { "minecraft:diamond_pickaxe", "computercraft:wireless_modem_advanced", "advanced_peripherals:end_automata_core" }
+            peripheral_types = { "minecraft:diamond_pickaxe", "computercraft:wireless_modem_advanced", "advancedperipherals:end_automata_core" }
         }
         config.save_config(".env", default_env)
     end

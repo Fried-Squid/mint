@@ -20,7 +20,7 @@ local function saveHome()
     print("Equipping End Automata Core...")
     if not inventory.equip_automata_core(inv) then
         print("ERROR: Failed to equip automata core!")
-        print("Make sure an advanced_peripherals:end_automata_core is in your peripherals sack")
+        print("Make sure an advancedperipherals:end_automata_core is in your peripherals sack")
         return false
     end
 

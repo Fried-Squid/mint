@@ -858,7 +858,7 @@ end
 function inventory.equip_pickaxe(inv)
     -- Look for pickaxe in peripherals sack
     for _, item in ipairs(inv.peripherals_sack.contents) do
-        if string.find(item.name, "pickaxe") then
+        if string.find(item.name, "diamond_pickaxe") then
             -- Select the item
             turtle.select(item.slot + 1)
 

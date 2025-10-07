@@ -854,11 +854,16 @@ function inventory.equip(inv, item_name)
     return false
 end
 
--- Equip the diamond pickaxe
+-- Equip the diamond pickaxe this does not work
+-- TODO: FIX THIS
+-- Calling an equip function does not force an Inventory rescan (
+-- should probably lazy force a rescan of the sack / use a swap pointer )
+-- meaning equipping item1 stops item2 from being equipped until update()
+-- is called
 function inventory.equip_pickaxe(inv)
     -- Look for pickaxe in peripherals sack
     for _, item in ipairs(inv.peripherals_sack.contents) do
-        if string.find(item.name, "diamond_pickaxe") then
+        if string.find(item.name, "pickaxe") then
             -- Select the item
             turtle.select(item.slot + 1)
 
@@ -880,7 +885,7 @@ function inventory.equip_pickaxe(inv)
     return false
 end
 
--- Equip the end automata core
+-- Equip the end automata core this does work
 function inventory.equip_automata_core(inv)
     -- Look for end automata core in peripherals sack
     for _, item in ipairs(inv.peripherals_sack.contents) do
